@@ -161,7 +161,7 @@ trend:
   hft_max_price_5m: 0.85
   hft_max_price_15m: 0.85
   hft_max_price_1h: 0.8
-  hft_barrier_enabled: false
+  hft_barrier_enabled: true
   hft_barrier_pct: 0.22
   hft_barrier_pct_15m: 0.25
   hft_barrier_pct_1h: 0.2
@@ -170,12 +170,12 @@ trend:
   hft_mode2_entry_mode: ''
   hft_mode2_trigger_cooldown_ms: 150
   hft_optimizer_objective_mode: win_rate
-  hft_optimizer_lookback_hours: 70
-  hft_optimizer_min_trades: 25
+  hft_optimizer_lookback_hours: 5000
+  hft_optimizer_min_trades: 500
   hft_barrier_matrix:
     bitcoin:
-      5m: 0.15
-      15m: 0.2
+      5m: 0.1
+      15m: 0.25
       1h: 0.2
     ethereum:
       5m: 0.35

@@ -32,15 +32,20 @@ PolySnipe is an HFT-first Polymarket runtime with:
 If dashboard is already running and wallet is not initialized/funded:
 1. Open `http://127.0.0.1:8898`
 2. Use the **Wallet Needs Funding** card
-3. Click **Run Setup (Auto)** to generate wallet + Polymarket API credentials
-4. Click **Copy Wallet** and fund that address on Polygon
-5. When setup finishes, click **Restart Now** in the restart prompt so credentials are loaded
+3. In **STEP 1**, click **Generate Wallet + API Keys** to create wallet + Polymarket API credentials
+4. When setup finishes, click **Restart Now** in the restart prompt so credentials are loaded
+5. In **STEP 2**, fund the wallet on Polygon with:
+   - **USDC.e** (trading balance)
+   - **POL** (gas)
+6. Use **Copy Wallet** to copy the deposit address
+7. Optional: click **Install Phantom Wallet**, then use **Copy Private Key** to import and track that wallet in Phantom
 
 Important:
-- Dashboard **Run Setup (Auto)** is credential/bootstrap only.
+- Dashboard **Generate Wallet + API Keys** is credential/bootstrap only (no dependency install).
 - First-time install on a clean machine should always run full setup first:
   - Windows: `setup-public.bat`
   - macOS/Linux: `python3 scripts/setup_public.py`
+- If Step 1 is already complete and you click **Generate Wallet + API Keys** again, the dashboard asks for confirmation before overwriting credentials.
 
 ## Manual Setup (Advanced)
 
@@ -75,7 +80,7 @@ Connectivity tip: if routing is blocked, use a VPN exit in Toronto or Netherland
 - auto-generates wallet + Polymarket API credentials in `app/.env`
 - prints exact next steps
 
-Dashboard card setup (`Run Setup (Auto)`) does not install dependencies; it assumes runtime is already up.
+Dashboard card setup (`Generate Wallet + API Keys`) does not install dependencies; it assumes runtime is already up.
 
 ## Security
 
