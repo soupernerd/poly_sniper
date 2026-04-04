@@ -38,6 +38,7 @@ from fastapi import FastAPI, Request, HTTPException, Cookie
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 
 logger = logging.getLogger(__name__)
+_async_shutdown_timeout_s = 2.0
 
 # -- PIN Auth --
 VIEWER_PIN = "1337"
@@ -418,13 +419,25 @@ async def stop_snipe_view():
         if server is not None:
             server.should_exit = True
             if getattr(server, "started", False):
-                await server.shutdown(sockets=[sock] if sock is not None else None)
+                try:
+                    await asyncio.wait_for(
+                        server.shutdown(sockets=[sock] if sock is not None else None),
+                        timeout=_async_shutdown_timeout_s,
+                    )
+                except asyncio.TimeoutError:
+                    logger.debug("Snipe-View shutdown timed out; continuing teardown")
     except Exception:
         pass
     try:
         if task is not None and not task.done():
             task.cancel()
-            await asyncio.gather(task, return_exceptions=True)
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(task, return_exceptions=True),
+                    timeout=_async_shutdown_timeout_s,
+                )
+            except asyncio.TimeoutError:
+                logger.debug("Snipe-View task cancel timed out; continuing teardown")
     except Exception:
         pass
     try:

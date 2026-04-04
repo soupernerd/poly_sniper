@@ -13,4 +13,11 @@ if not exist ".venv\Scripts\python.exe" (
   exit /b 1
 )
 ".venv\Scripts\python.exe" main.py
+set EXIT_CODE=%ERRORLEVEL%
+if "%EXIT_CODE%"=="0" (
+  exit /b 0
+)
+echo.
+echo Runtime exited with code %EXIT_CODE%.
 pause
+exit /b %EXIT_CODE%

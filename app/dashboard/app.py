@@ -85,6 +85,7 @@ _restart_lock = threading.Lock()
 _restart_pending = False
 _shutdown_lock = threading.Lock()
 _shutdown_watchdog_started = False
+_async_shutdown_timeout_s = 2.0
 _dashboard_server = None
 _dashboard_server_task = None
 _dashboard_sock = None
@@ -2953,6 +2954,8 @@ def _shadow_worker_loop():
 
 def _ensure_shadow_optimizer_running():
     global _shadow_worker_thread
+    if _bot_controls.get("request_stop"):
+        return
     with _shadow_worker_lock:
         if _shadow_worker_thread and _shadow_worker_thread.is_alive():
             return
@@ -2966,6 +2969,8 @@ def _ensure_shadow_optimizer_running():
 
 
 def _trigger_shadow_optimizer_v2_run(trigger: str):
+    if _bot_controls.get("request_stop"):
+        return
     _ensure_shadow_optimizer_running()
 
     def _kick():
@@ -4068,13 +4073,25 @@ async def stop_dashboard():
         if server is not None:
             server.should_exit = True
             if getattr(server, "started", False):
-                await server.shutdown(sockets=[sock] if sock is not None else None)
+                try:
+                    await asyncio.wait_for(
+                        server.shutdown(sockets=[sock] if sock is not None else None),
+                        timeout=_async_shutdown_timeout_s,
+                    )
+                except asyncio.TimeoutError:
+                    logger.debug("Dashboard shutdown timed out; continuing teardown")
     except Exception:
         pass
     try:
         if task is not None and not task.done():
             task.cancel()
-            await asyncio.gather(task, return_exceptions=True)
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(task, return_exceptions=True),
+                    timeout=_async_shutdown_timeout_s,
+                )
+            except asyncio.TimeoutError:
+                logger.debug("Dashboard task cancel timed out; continuing teardown")
     except Exception:
         pass
     try:
