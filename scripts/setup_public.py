@@ -183,11 +183,14 @@ def _install_requirements() -> None:
     _run([py, "-m", "pip", "install", "-r", str(REQ_FILE)], cwd=APP_DIR)
 
 
-def _ensure_env() -> dict[str, str]:
+def _ensure_env(*, rotate_credentials: bool = False, overwrite_env: bool = False) -> dict[str, str]:
     if not ENV_EXAMPLE.exists():
         raise FileNotFoundError(f"Missing template: {ENV_EXAMPLE}")
 
-    if not ENV_FILE.exists():
+    if overwrite_env:
+        shutil.copy2(ENV_EXAMPLE, ENV_FILE)
+        print(f"[setup] Overwrote {ENV_FILE} from template")
+    elif not ENV_FILE.exists():
         shutil.copy2(ENV_EXAMPLE, ENV_FILE)
         print(f"[setup] Created {ENV_FILE} from template")
     else:
@@ -198,13 +201,14 @@ def _ensure_env() -> dict[str, str]:
     need_private = _is_missing(values.get("POLYMARKET_PRIVATE_KEY", ""))
     need_wallet = _is_missing(values.get("POLYMARKET_WALLET_ADDRESS", ""))
     need_api = any(_is_missing(values.get(k, "")) for k in ("POLYMARKET_API_KEY", "POLYMARKET_API_SECRET", "POLYMARKET_API_PASSPHRASE"))
+    if rotate_credentials:
+        need_private = True
+        need_wallet = True
+        need_api = True
 
     if need_private or need_wallet or need_api:
         print("[setup] Auto-generating wallet + Polymarket API credentials")
-        generated = _generate_wallet_and_api(
-            private_key="" if need_private else values.get("POLYMARKET_PRIVATE_KEY", ""),
-            wallet_address="" if need_wallet else values.get("POLYMARKET_WALLET_ADDRESS", ""),
-        )
+        generated = _generate_wallet_and_api(private_key="", wallet_address="")
         values["POLYMARKET_PRIVATE_KEY"] = generated["private_key"]
         values["POLYMARKET_WALLET_ADDRESS"] = generated["wallet_address"]
         values["POLYMARKET_API_KEY"] = generated["api_key"]
@@ -274,6 +278,16 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Do not request runtime restart after setup.",
     )
+    parser.add_argument(
+        "--rotate-credentials",
+        action="store_true",
+        help="Always generate a new wallet + Polymarket API credentials.",
+    )
+    parser.add_argument(
+        "--overwrite-env",
+        action="store_true",
+        help="Overwrite app/.env from app/.env.example before writing credentials.",
+    )
     return parser.parse_args(argv)
 
 
@@ -313,7 +327,10 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         if not args.no_pip:
             _install_requirements()
-        env_values = _ensure_env()
+        env_values = _ensure_env(
+            rotate_credentials=args.rotate_credentials,
+            overwrite_env=args.overwrite_env,
+        )
         _print_next_steps(env_values)
         if not args.no_restart:
             if _request_runtime_restart():

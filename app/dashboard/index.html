@@ -1943,7 +1943,7 @@
       if (_setupInFlight) return;
       if (_setupEnvExists) {
         const confirmText = window.prompt(
-          'Setup has already been run (.env exists). Running it again can replace wallet/API credentials. Type YES to continue.',
+          'Setup has already been run (.env exists). Running again will overwrite app/.env and generate a NEW wallet + API credentials. Type YES to continue.',
           ''
         );
         if ((confirmText || '').trim().toUpperCase() !== 'YES') {

@@ -904,7 +904,15 @@ async def api_setup_bootstrap():
         return JSONResponse({"ok": False, "message": "Setup script not found"}, status_code=500)
     try:
         proc = subprocess.run(
-            [sys.executable, str(SETUP_SCRIPT_PATH), "--no-venv", "--no-pip", "--no-restart"],
+            [
+                sys.executable,
+                str(SETUP_SCRIPT_PATH),
+                "--no-venv",
+                "--no-pip",
+                "--no-restart",
+                "--overwrite-env",
+                "--rotate-credentials",
+            ],
             cwd=str(REPO_ROOT),
             text=True,
             capture_output=True,

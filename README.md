@@ -45,7 +45,7 @@ Important:
 - First-time install on a clean machine should always run full setup first:
   - Windows: `setup-public.bat`
   - macOS/Linux: `python3 scripts/setup_public.py`
-- If Step 1 is already complete and you click **Generate Wallet + API Keys** again, the dashboard asks for confirmation before overwriting credentials.
+- If Step 1 is already complete and you click **Generate Wallet + API Keys** again, the dashboard asks for confirmation, then overwrites `app/.env` and rotates wallet/API credentials.
 
 ## Manual Setup (Advanced)
 
@@ -57,6 +57,7 @@ Important:
    - macOS/Linux: `app/.venv/bin/python -m pip install -r app/requirements.txt`
 3. Generate `.env` + credentials:
    - `python scripts/setup_public.py --no-venv --no-pip`
+   - Rotate to a brand-new wallet + API set (overwrite env): `python scripts/setup_public.py --no-venv --no-pip --overwrite-env --rotate-credentials`
    - If runtime is already live on `127.0.0.1:8898`, setup auto-requests a restart.
 4. Start bot:
    - Windows: `start-hft.bat`
