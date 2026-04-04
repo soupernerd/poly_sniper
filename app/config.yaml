@@ -1,0 +1,221 @@
+api:
+  clob: https://clob.polymarket.com
+  data: https://data-api.polymarket.com
+  gamma: https://gamma-api.polymarket.com
+  chain_id: 137
+  signature_type: 0
+scanner:
+  interval_seconds: 1.0
+  assets: bitcoin
+  time_frames: 5m,15m,1h
+  pre_window_seconds: 60
+  post_window_seconds: 30
+  ws_cleanup_delay: 180
+  winner_threshold: 0.82
+  max_events_per_query: 100
+  pre_end_seconds: 0
+  lookahead_enabled: true
+  lookahead_seconds: 0
+  pre_end_seconds_5m: 0
+  pre_end_seconds_15m: 0
+  pre_end_seconds_1h: 0
+  pre_end_seconds_4h: 0
+  pre_end_seconds_1d: 0
+  pre_end_threshold: 0.01
+  post_end_bet_seconds: 0
+  stop_buffer_seconds: 0
+  min_conviction: 0.0
+  min_conviction_5m: 0.0
+  min_conviction_15m: 0.0
+  min_conviction_1h: 0.0
+  min_conviction_4h: 0.0
+  min_conviction_1d: 0.0
+  max_gap_pct: 0.0
+  price_feed: binance
+  price_gap_pct: 0.0
+  price_gap_pct_5m: 0.0
+  price_gap_pct_15m: 0.0
+  price_gap_pct_1h: 0.0
+  price_gap_pct_4h: 0.0
+  price_gap_pct_1d: 0.0
+  pre_end_threshold_5m: 0.0
+  pre_end_threshold_15m: 0.0
+  pre_end_threshold_1h: 0.0
+  pre_end_threshold_4h: 0.0
+  pre_end_threshold_1d: 0.0
+  max_gap_pct_5m: 0.0
+  max_gap_pct_15m: 0.0
+  max_gap_pct_1h: 0.0
+  max_gap_pct_4h: 0.0
+  max_gap_pct_1d: 0.0
+  ptb_capture_offset: 0.0
+  start_buffer_seconds: 0
+  asset_timeframe_enabled:
+    bitcoin:
+      5m: true
+      15m: true
+      1h: false
+      4h: false
+      1d: false
+    ethereum:
+      5m: true
+      15m: true
+      1h: false
+      4h: false
+      1d: false
+    solana:
+      5m: true
+      15m: true
+      1h: false
+      4h: false
+      1d: false
+    xrp:
+      5m: true
+      15m: true
+      1h: false
+      4h: false
+      1d: false
+execution:
+  max_buy_price: 0.0
+  max_buy_price_5m: 0.0
+  max_buy_price_15m: 0.0
+  max_buy_price_1h: 0.0
+  max_buy_price_4h: 0.0
+  max_buy_price_1d: 0.0
+  min_edge: 0.0
+  max_bet: 0.01
+  fill_fraction: 0.15
+  max_concurrent: 17
+  cooldown_seconds: 300
+  no_bet_assets: null
+  oracle_consensus: false
+  max_bet_5m: 0.0
+  max_bet_15m: 0.0
+  max_bet_1h: 0.0
+  max_bet_4h: 0.0
+  max_bet_1d: 0.0
+  swing_guard_enabled: false
+  swing_guard_max_pct: 0.45
+  dynamic_max_price_enabled: false
+  dynamic_max_price_pct: 0.02
+  min_edge_5m: 0.0
+  min_edge_15m: 0.0
+  min_edge_1h: 0.0
+  min_edge_4h: 0.0
+  min_edge_1d: 0.0
+  economic_pause_drawdown: 20.0
+  gtc_fallback_enabled: false
+  trading_mode: live
+post_end:
+  enabled: false
+  max_bet: 25.0
+  maker_price: 0.99
+  window_seconds: 60
+  poll_interval: 10.0
+  fetch_leadtime: 3.0
+offload:
+  sell_price: 0.0
+  sell_price_t1: 0.0
+  sell_price_t2: 0.0
+  sell_price_t3: 0.0
+  sell_price_t4: 0.0
+  pct_offload: 0
+categories:
+  sports_enabled: false
+  sports_max_bet: 5.0
+  sports_maker_price: 0.99
+  sports_window_seconds: 60
+  sports_poll_interval: 10.0
+  sports_leagues: all
+redemption:
+  auto_redeem: true
+  check_interval: 30
+  stale_sell_after_seconds: 3600
+  stale_sell_min_price: 0.99
+database:
+  path: data/sniper.db
+logging:
+  level: INFO
+  file: logs/sniper.log
+blackout:
+  slots_5m: ''
+  slots_5m_am: ''
+  slots_5m_pm: ''
+  slots_15m: ''
+  slots_15m_am: ''
+  slots_15m_pm: ''
+  slots_1h: ''
+  slots_1h_am: ''
+  slots_1h_pm: ''
+  slots_4h: ''
+  slots_4h_am: ''
+  slots_4h_pm: ''
+  slots_1d: ''
+  slots_1d_am: ''
+  slots_1d_pm: ''
+trend:
+  hft_bet_amount: 1.0
+  hft_flip_profit_pct: 0.0
+  hft_muzzle_seconds: 0
+  hft_max_price: 0.85
+  hft_max_price_5m: 0.85
+  hft_max_price_15m: 0.85
+  hft_max_price_1h: 0.8
+  hft_barrier_enabled: false
+  hft_barrier_pct: 0.22
+  hft_barrier_pct_15m: 0.25
+  hft_barrier_pct_1h: 0.2
+  hft_barrier_delay: 0
+  hft_armed_sniper_enabled: true
+  hft_mode2_entry_mode: ''
+  hft_mode2_trigger_cooldown_ms: 150
+  hft_optimizer_objective_mode: win_rate
+  hft_optimizer_lookback_hours: 70
+  hft_optimizer_min_trades: 25
+  hft_barrier_matrix:
+    bitcoin:
+      5m: 0.15
+      15m: 0.2
+      1h: 0.2
+    ethereum:
+      5m: 0.35
+      15m: 0.3
+      1h: 0.25
+    solana:
+      5m: 0.12
+      15m: 0.08
+      1h: 0.12
+    xrp:
+      5m: 0.08
+      15m: 0.08
+      1h: 0.3
+  hft_max_price_matrix:
+    bitcoin:
+      5m: 0.96
+      15m: 0.96
+      1h: 0.8
+    ethereum:
+      5m: 0.98
+      15m: 0.75
+      1h: 0.85
+    solana:
+      5m: 0.85
+      15m: 0.9
+      1h: 0.8
+    xrp:
+      5m: 0.7
+      15m: 0.85
+      1h: 0.85
+monitor:
+  enabled: true
+  assets: bitcoin,ethereum,solana,xrp
+  time_frames: 5m,15m,1h,4h,1d
+  discovery_interval_seconds: 15
+  max_events_per_query: 250
+  pre_start_capture_seconds: 15
+  post_end_track_seconds: 120
+  sample_5m_seconds: 1
+  sample_15m_seconds: 1
+  sample_1h_seconds: 60
+  sample_4h_seconds: 240
+  sample_1d_seconds: 1440

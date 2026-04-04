@@ -1,0 +1,629 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PolySnipe - Clock Blackout</title>
+<style>
+  :root {
+    --bg: #0f1117; --card: #1a1d26; --border: #2a2d36;
+    --text: #e0e0e0; --dim: #888; --accent: #f59e0b;
+    --green: #22c55e; --red: #ef4444; --yellow: #eab308;
+    --ctrl-bg: #161920;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    background: var(--bg); color: var(--text);
+    min-height: 100vh;
+  }
+
+  /* Header */
+  header {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 12px 20px; border-bottom: 1px solid var(--border);
+  }
+  header h1 { font-size: 1.3em; font-weight: 600; }
+  header h1 span { color: var(--accent); }
+  .back-link {
+    color: var(--dim); text-decoration: none; font-size: 0.85em;
+    transition: color 0.15s; display: flex; align-items: center; gap: 6px;
+  }
+  .back-link:hover { color: var(--accent); }
+  .header-right { display: flex; align-items: center; gap: 14px; }
+  .page-label {
+    font-size: 0.8em; text-transform: uppercase; letter-spacing: 1px;
+    color: var(--dim); font-weight: 600;
+  }
+
+  /* Main content */
+  .content { max-width: 900px; margin: 0 auto; padding: 24px 20px; }
+
+  .section-title {
+    font-size: 0.75em; text-transform: uppercase; letter-spacing: 1px;
+    color: var(--dim); margin-bottom: 12px; font-weight: 600;
+  }
+
+  /* Clock face container */
+  .clock-section {
+    background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+    padding: 24px; margin-bottom: 20px;
+  }
+  .clock-section h2 {
+    font-size: 0.95em; color: var(--accent); margin-bottom: 16px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .clock-section h2 .tf-badge {
+    font-size: 0.75em; padding: 2px 8px; border-radius: 4px;
+    background: rgba(245,158,11,0.15); border: 1px solid rgba(245,158,11,0.3);
+  }
+
+  /* SVG clock */
+  .clock-container {
+    display: flex; justify-content: center; align-items: center;
+    position: relative;
+  }
+  .clock-svg { cursor: default; }
+  .clock-svg .wedge {
+    cursor: pointer; transition: opacity 0.15s;
+  }
+  .clock-svg .wedge:hover { opacity: 0.85; }
+  .clock-svg .wedge-fill { transition: fill 0.2s; }
+  .clock-svg .wedge-fill.default { fill: rgba(255,255,255,0.10); stroke: rgba(255,255,255,0.18); stroke-width: 1.5; }
+  .clock-svg .wedge-fill.has-data { fill: rgba(34, 197, 94, 0.25); stroke: var(--green); stroke-width: 1.5; }
+  .clock-svg .wedge-fill.blocked { fill: rgba(239, 68, 68, 0.3); stroke: var(--red); stroke-width: 1.5; }
+  .clock-svg .slot-label {
+    fill: var(--dim); font-size: 11px; font-family: 'Cascadia Code','Consolas',monospace;
+    pointer-events: none; text-anchor: middle; dominant-baseline: middle;
+  }
+  .clock-svg .slot-label.blocked-label { fill: var(--red); }
+  .clock-svg .slot-label.has-data-label { fill: var(--green); }
+  .clock-svg .slot-stats {
+    fill: var(--dim); font-size: 8.5px; font-family: 'Segoe UI',system-ui,sans-serif;
+    pointer-events: none; text-anchor: middle; dominant-baseline: middle;
+  }
+  .clock-svg .slot-stats.positive { fill: var(--green); }
+  .clock-svg .slot-stats.negative { fill: var(--red); }
+  .clock-svg .center-circle { fill: var(--bg); stroke: var(--border); stroke-width: 1; }
+  .clock-svg .center-text {
+    fill: var(--dim); font-size: 10px; font-family: 'Segoe UI',system-ui,sans-serif;
+    text-anchor: middle; dominant-baseline: middle;
+  }
+  .clock-svg .now-dot { fill: var(--accent); }
+
+  /* 15m linear row */
+  .slot-row { display: flex; gap: 10px; flex-wrap: wrap; }
+  .slot-btn {
+    flex: 1; min-width: 120px; padding: 16px 14px; border-radius: 8px;
+    cursor: pointer; border: 1.5px solid var(--border); background: rgba(255,255,255,0.03);
+    color: var(--text); font-family: inherit; text-align: center;
+    transition: all 0.15s; user-select: none;
+  }
+  .slot-btn:hover { border-color: var(--accent); }
+  .slot-btn.active { border-color: var(--green); background: rgba(34,197,94,0.08); }
+  .slot-btn.blocked { border-color: var(--red); background: rgba(239,68,68,0.1); }
+  .slot-btn .slot-time {
+    font-size: 1.3em; font-weight: 700;
+    font-family: 'Cascadia Code','Consolas',monospace;
+  }
+  .slot-btn.active .slot-time { color: var(--green); }
+  .slot-btn.blocked .slot-time { color: var(--red); }
+  .slot-btn .slot-wl {
+    font-size: 0.78em; color: var(--dim); margin-top: 4px;
+  }
+  .slot-btn .slot-pnl {
+    font-size: 0.85em; font-weight: 600; margin-top: 2px;
+  }
+  .slot-btn .slot-pnl.positive { color: var(--green); }
+  .slot-btn .slot-pnl.negative { color: var(--red); }
+  .slot-btn.partial { border-color: var(--yellow); background: rgba(234,179,8,0.08); }
+  .slot-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-top: 8px;
+  }
+  .slot-half {
+    border: 1px solid #2b3342;
+    background: #141a25;
+    border-radius: 6px;
+    padding: 8px 6px;
+    cursor: pointer;
+    transition: all 0.15s;
+    user-select: none;
+  }
+  .slot-half:hover { border-color: var(--accent); }
+  .slot-half.blocked { border-color: var(--red); background: rgba(239,68,68,0.10); }
+  .slot-half .half-label {
+    font-size: 0.68em;
+    text-transform: uppercase;
+    letter-spacing: 0.35px;
+    color: var(--dim);
+    font-weight: 700;
+  }
+  .slot-half .half-wl {
+    font-size: 0.74em;
+    color: var(--dim);
+    margin-top: 2px;
+  }
+  .slot-half .half-pnl {
+    font-size: 0.76em;
+    margin-top: 2px;
+    font-weight: 600;
+  }
+  .slot-half .half-pnl.positive { color: var(--green); }
+  .slot-half .half-pnl.negative { color: var(--red); }
+
+  /* Summary card */
+  .summary-card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+    padding: 16px 20px; display: flex; gap: 24px; flex-wrap: wrap;
+    align-items: center;
+  }
+  .summary-stat { text-align: center; }
+  .summary-stat .label { font-size: 0.7em; color: var(--dim); text-transform: uppercase; letter-spacing: 0.5px; }
+  .summary-stat .value { font-size: 1.4em; font-weight: 700; margin-top: 2px; }
+  .summary-stat .value.green { color: var(--green); }
+  .summary-stat .value.red { color: var(--red); }
+  .summary-stat .value.accent { color: var(--accent); }
+
+  /* Toast */
+  .toast {
+    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+    background: var(--card); border: 1px solid var(--accent); color: var(--text);
+    padding: 10px 20px; border-radius: 8px; font-size: 0.85em;
+    opacity: 0; transition: opacity 0.3s; pointer-events: none; z-index: 100;
+  }
+  .toast.show { opacity: 1; }
+
+  /* Legend */
+  .legend { display: flex; gap: 16px; margin-top: 12px; justify-content: center; }
+  .legend-item { display: flex; align-items: center; gap: 5px; font-size: 0.75em; color: var(--dim); }
+  .legend-dot { width: 10px; height: 10px; border-radius: 3px; }
+  .legend-dot.green { background: var(--green); opacity: 0.7; }
+  .legend-dot.red { background: var(--red); opacity: 0.7; }
+  .legend-dot.grey { background: rgba(255,255,255,0.15); }
+
+  .slot-split {
+    font-size: 0.72em; color: var(--dim); margin-top: 2px; line-height: 1.25;
+  }
+  .slot-split .amv { color: #7dd3fc; font-weight: 600; }
+  .slot-split .pmv { color: #fca5a5; font-weight: 600; }
+
+  @media (max-width: 600px) {
+    .content { padding: 12px; }
+    .clock-section { padding: 14px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div style="display:flex;align-items:center;gap:16px;">
+    <h1>&#9889; Poly<span>Snipe</span></h1>
+    <a class="back-link" href="/">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><polyline points="12 19 5 12 12 5"/></svg>
+      Dashboard
+    </a>
+  </div>
+  <div class="header-right">
+    <span class="page-label">Clock Blackout</span>
+  </div>
+</header>
+
+<div class="content">
+
+  <!-- 5-Minute Clock -->
+  <div class="clock-section" id="section5m">
+    <h2><span class="tf-badge">5m</span> 5-Minute Markets</h2>
+    <div style="font-size:0.74em;color:var(--dim);margin-bottom:8px;">
+      Each wedge is split: inner half is <span class="amv">AM</span>, outer half is <span class="pmv">PM</span>. Click either half to toggle.
+    </div>
+    <div class="clock-container">
+      <svg class="clock-svg" id="clock5m" width="420" height="420" viewBox="-210 -210 420 420"></svg>
+    </div>
+    <div class="legend">
+      <div class="legend-item"><div class="legend-dot green"></div> Active</div>
+      <div class="legend-item"><div class="legend-dot red"></div> Blocked</div>
+      <div class="legend-item"><div class="legend-dot grey"></div> No data</div>
+    </div>
+  </div>
+
+  <!-- 15-Minute Slots -->
+  <div class="clock-section" id="section15m">
+    <h2><span class="tf-badge">15m</span> 15-Minute Markets</h2>
+    <div style="font-size:0.74em;color:var(--dim);margin-bottom:8px;">
+      Each slot is split into <span class="amv">AM</span> and <span class="pmv">PM</span> halves. Click a half to toggle only that side.
+    </div>
+    <div class="slot-row" id="slots15m"></div>
+  </div>
+
+  <!-- 1h / 4h / 1d simple toggles -->
+  <div class="clock-section" id="sectionLong">
+    <h2><span class="tf-badge">1h+</span> Hourly &amp; Longer</h2>
+    <div class="slot-row" id="slotsLong"></div>
+  </div>
+
+  <!-- Summary -->
+  <div class="summary-card" id="summaryCard">
+    <div class="summary-stat">
+      <div class="label">Session Sides Blocked</div>
+      <div class="value accent" id="sumBlocked">0</div>
+    </div>
+    <div class="summary-stat">
+      <div class="label">Blocked losses saved</div>
+      <div class="value green" id="sumSaved">--</div>
+    </div>
+    <div class="summary-stat">
+      <div class="label">Blocked wins missed</div>
+      <div class="value red" id="sumMissed">--</div>
+    </div>
+    <div class="summary-stat">
+      <div class="label">Net impact</div>
+      <div class="value" id="sumNet">--</div>
+    </div>
+  </div>
+
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+let blackout = {
+  "5m": { all: [], am: [], pm: [] },
+  "15m": { all: [], am: [], pm: [] },
+  "1h": { all: [], am: [], pm: [] },
+  "4h": { all: [], am: [], pm: [] },
+  "1d": { all: [], am: [], pm: [] },
+};
+let stats = {};
+
+const SLOTS_5M = [0,5,10,15,20,25,30,35,40,45,50,55];
+const SLOTS_15M = [0,15,30,45];
+const LONG_TFS = [
+  { tf: "1h", label: "1-Hour", slot: 0 },
+  { tf: "4h", label: "4-Hour", slot: 0 },
+  { tf: "1d", label: "Daily", slot: 0 },
+];
+const SLOT_MAP = { "5m": SLOTS_5M, "15m": SLOTS_15M, "1h": [0], "4h": [0], "1d": [0] };
+
+async function loadBlackout() {
+  const r = await fetch("/api/blackout");
+  blackout = await r.json();
+  normalizeBlackout();
+}
+
+async function loadStats() {
+  try {
+    const r = await fetch("/api/blackout/stats");
+    if (r.ok) stats = await r.json();
+  } catch (_) {}
+}
+
+async function saveBlackout() {
+  await fetch("/api/blackout", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(blackout),
+  });
+  toast("Blackout saved");
+}
+
+function toast(msg) {
+  const el = document.getElementById("toast");
+  el.textContent = msg;
+  el.classList.add("show");
+  setTimeout(() => el.classList.remove("show"), 1800);
+}
+
+function normalizeBlackout() {
+  const tfs = ["5m", "15m", "1h", "4h", "1d"];
+  for (const tf of tfs) {
+    const raw = blackout[tf];
+    if (Array.isArray(raw)) {
+      blackout[tf] = { all: raw.slice(), am: [], pm: [] };
+      continue;
+    }
+    if (!raw || typeof raw !== "object") {
+      blackout[tf] = { all: [], am: [], pm: [] };
+      continue;
+    }
+    blackout[tf] = {
+      all: Array.isArray(raw.all) ? raw.all.slice() : [],
+      am: Array.isArray(raw.am) ? raw.am.slice() : [],
+      pm: Array.isArray(raw.pm) ? raw.pm.slice() : [],
+    };
+  }
+}
+
+function getStats(tf, slot, session) {
+  const base = (stats[tf] || {})[slot] || {};
+  const s = base[session] || { wins: 0, losses: 0, net: 0 };
+  return {
+    wins: Number(s.wins || 0),
+    losses: Number(s.losses || 0),
+    net: Number(s.net || 0),
+  };
+}
+
+function isSessionBlocked(tf, slot, session) {
+  const b = blackout[tf] || {};
+  if ((b.all || []).includes(slot)) return true;
+  return (b[session] || []).includes(slot);
+}
+
+function toggleSession(tf, slot, session) {
+  const b = blackout[tf] || { all: [], am: [], pm: [] };
+  b.all = Array.isArray(b.all) ? b.all : [];
+  b.am = Array.isArray(b.am) ? b.am : [];
+  b.pm = Array.isArray(b.pm) ? b.pm : [];
+
+  const has = (arr) => arr.includes(slot);
+  const add = (arr) => { if (!arr.includes(slot)) arr.push(slot); };
+  const del = (arr) => {
+    const i = arr.indexOf(slot);
+    if (i >= 0) arr.splice(i, 1);
+  };
+
+  // Expand legacy/global "all" slot into explicit am+pm before editing one side.
+  if (has(b.all)) {
+    del(b.all);
+    add(b.am);
+    add(b.pm);
+  }
+
+  if (session !== "am" && session !== "pm") return;
+  if (has(b[session])) del(b[session]);
+  else add(b[session]);
+
+  b.all.sort((a, b) => a - b);
+  b.am.sort((a, b) => a - b);
+  b.pm.sort((a, b) => a - b);
+  blackout[tf] = b;
+  saveBlackout();
+  render();
+}
+
+function annularPath(cx, cy, rOuter, rInner, a1, a2) {
+  const x1o = cx + rOuter * Math.cos(a1), y1o = cy + rOuter * Math.sin(a1);
+  const x2o = cx + rOuter * Math.cos(a2), y2o = cy + rOuter * Math.sin(a2);
+  const x1i = cx + rInner * Math.cos(a2), y1i = cy + rInner * Math.sin(a2);
+  const x2i = cx + rInner * Math.cos(a1), y2i = cy + rInner * Math.sin(a1);
+  return `M${x1o},${y1o} A${rOuter},${rOuter} 0 0,1 ${x2o},${y2o} L${x1i},${y1i} A${rInner},${rInner} 0 0,0 ${x2i},${y2i} Z`;
+}
+
+function sessionClass(blocked, hasData) {
+  if (blocked) return "blocked";
+  if (hasData) return "has-data";
+  return "default";
+}
+
+function render5mClock() {
+  const svg = document.getElementById("clock5m");
+  svg.innerHTML = "";
+  const cx = 0, cy = 0;
+  const outerR = 180, innerR = 80, splitR = 130, labelR = 195;
+  const n = 12;
+  const angleStep = (2 * Math.PI) / n;
+  const offset = -Math.PI / 2;
+
+  for (let i = 0; i < n; i++) {
+    const slot = SLOTS_5M[i];
+    const sAm = getStats("5m", slot, "am");
+    const sPm = getStats("5m", slot, "pm");
+    const amBlocked = isSessionBlocked("5m", slot, "am");
+    const pmBlocked = isSessionBlocked("5m", slot, "pm");
+    const amHasData = (sAm.wins + sAm.losses) > 0;
+    const pmHasData = (sPm.wins + sPm.losses) > 0;
+
+    const a1 = offset + i * angleStep - angleStep / 2 + 0.02;
+    const a2 = offset + i * angleStep + angleStep / 2 - 0.02;
+    const midAngle = offset + i * angleStep;
+
+    const pmGroup = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    pmGroup.classList.add("wedge");
+    pmGroup.onclick = () => toggleSession("5m", slot, "pm");
+    const pmPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    pmPath.setAttribute("d", annularPath(cx, cy, outerR, splitR, a1, a2));
+    pmPath.classList.add("wedge-fill", sessionClass(pmBlocked, pmHasData));
+    pmGroup.appendChild(pmPath);
+    svg.appendChild(pmGroup);
+
+    const amGroup = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    amGroup.classList.add("wedge");
+    amGroup.onclick = () => toggleSession("5m", slot, "am");
+    const amPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    amPath.setAttribute("d", annularPath(cx, cy, splitR - 1, innerR, a1, a2));
+    amPath.classList.add("wedge-fill", sessionClass(amBlocked, amHasData));
+    amGroup.appendChild(amPath);
+    svg.appendChild(amGroup);
+
+    const amR = (innerR + splitR) / 2;
+    const pmR = (splitR + outerR) / 2;
+    const amX = cx + amR * Math.cos(midAngle), amY = cy + amR * Math.sin(midAngle);
+    const pmX = cx + pmR * Math.cos(midAngle), pmY = cy + pmR * Math.sin(midAngle);
+
+    const amText = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    amText.classList.add("slot-stats", sAm.net >= 0 ? "positive" : "negative");
+    amText.setAttribute("x", amX);
+    amText.setAttribute("y", amY);
+    amText.textContent = `A ${sAm.wins}/${sAm.losses}`;
+    svg.appendChild(amText);
+
+    const pmText = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    pmText.classList.add("slot-stats", sPm.net >= 0 ? "positive" : "negative");
+    pmText.setAttribute("x", pmX);
+    pmText.setAttribute("y", pmY);
+    pmText.textContent = `P ${sPm.wins}/${sPm.losses}`;
+    svg.appendChild(pmText);
+
+    const lx = cx + labelR * Math.cos(midAngle);
+    const ly = cy + labelR * Math.sin(midAngle);
+    const lbl = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    lbl.classList.add("slot-label");
+    if (amBlocked || pmBlocked) lbl.classList.add("blocked-label");
+    else if (amHasData || pmHasData) lbl.classList.add("has-data-label");
+    lbl.setAttribute("x", lx);
+    lbl.setAttribute("y", ly);
+    lbl.textContent = ":" + String(slot).padStart(2, "0");
+    svg.appendChild(lbl);
+  }
+
+  const cc = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+  cc.classList.add("center-circle");
+  cc.setAttribute("cx", cx);
+  cc.setAttribute("cy", cy);
+  cc.setAttribute("r", innerR - 4);
+  svg.appendChild(cc);
+
+  const ct = document.createElementNS("http://www.w3.org/2000/svg", "text");
+  ct.classList.add("center-text");
+  ct.setAttribute("x", cx);
+  ct.setAttribute("y", cy - 6);
+  ct.textContent = "5-MIN";
+  svg.appendChild(ct);
+
+  const ct2 = document.createElementNS("http://www.w3.org/2000/svg", "text");
+  ct2.classList.add("center-text");
+  ct2.setAttribute("x", cx);
+  ct2.setAttribute("y", cy + 10);
+  ct2.textContent = "SLOTS";
+  svg.appendChild(ct2);
+
+  const nowEt = new Date(new Date().toLocaleString("en-US", { timeZone: "America/New_York" }));
+  const nowSlot = Math.floor(nowEt.getMinutes() / 5) * 5;
+  const idx = SLOTS_5M.indexOf(nowSlot);
+  if (idx >= 0) {
+    const angle = offset + idx * angleStep;
+    const dotR = outerR + 8;
+    const dx = cx + dotR * Math.cos(angle);
+    const dy = cy + dotR * Math.sin(angle);
+    const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+    dot.classList.add("now-dot");
+    dot.setAttribute("cx", dx);
+    dot.setAttribute("cy", dy);
+    dot.setAttribute("r", 4);
+    svg.appendChild(dot);
+  }
+}
+
+function halfHtml(tf, slot, session, s, blocked) {
+  const has = (s.wins + s.losses) > 0;
+  const pnl = has ? (s.net >= 0 ? "+$" : "-$") + Math.abs(s.net).toFixed(2) : "";
+  const wl = has ? `${s.wins}W ${s.losses}L` : "No trades";
+  return `
+    <div class="slot-half ${blocked ? "blocked" : ""}" onclick="toggleSession('${tf}', ${slot}, '${session}')">
+      <div class="half-label">${session.toUpperCase()}</div>
+      <div class="half-wl">${wl}</div>
+      <div class="half-pnl ${s.net >= 0 ? "positive" : "negative"}">${pnl}</div>
+    </div>
+  `;
+}
+
+function renderSplitSlots(containerId, tf, slots, titleMode) {
+  const container = document.getElementById(containerId);
+  container.innerHTML = "";
+
+  for (const slot of slots) {
+    const sAll = getStats(tf, slot, "all");
+    const sAm = getStats(tf, slot, "am");
+    const sPm = getStats(tf, slot, "pm");
+    const amBlocked = isSessionBlocked(tf, slot, "am");
+    const pmBlocked = isSessionBlocked(tf, slot, "pm");
+    const hasData = (sAll.wins + sAll.losses + sAm.wins + sAm.losses + sPm.wins + sPm.losses) > 0;
+    const fullyBlocked = amBlocked && pmBlocked;
+    const partial = amBlocked !== pmBlocked;
+
+    const card = document.createElement("div");
+    card.className = "slot-btn " + (fullyBlocked ? "blocked" : hasData ? "active" : "") + (partial ? " partial" : "");
+    const title = titleMode === "time" ? ":" + String(slot).padStart(2, "0") : titleMode;
+    card.innerHTML = `
+      <div class="slot-time">${title}</div>
+      <div class="slot-wl">${hasData ? `${sAll.wins}W ${sAll.losses}L (ALL)` : "No trades"}</div>
+      <div class="slot-grid">
+        ${halfHtml(tf, slot, "am", sAm, amBlocked)}
+        ${halfHtml(tf, slot, "pm", sPm, pmBlocked)}
+      </div>
+    `;
+    container.appendChild(card);
+  }
+}
+
+function render15mSlots() {
+  renderSplitSlots("slots15m", "15m", SLOTS_15M, "time");
+}
+
+function renderLongSlots() {
+  const container = document.getElementById("slotsLong");
+  container.innerHTML = "";
+  for (const row of LONG_TFS) {
+    const wrapper = document.createElement("div");
+    wrapper.style.flex = "1";
+    wrapper.style.minWidth = "190px";
+    wrapper.id = "slot-" + row.tf;
+    container.appendChild(wrapper);
+    renderSplitSlots(wrapper.id, row.tf, [0], row.label);
+  }
+}
+
+function renderSummary() {
+  let totalBlocked = 0;
+  let savedLosses = 0;
+  let missedWins = 0;
+  let netImpact = 0;
+
+  for (const [tf, slots] of Object.entries(SLOT_MAP)) {
+    for (const slot of slots) {
+      if (isSessionBlocked(tf, slot, "am")) {
+        const s = getStats(tf, slot, "am");
+        totalBlocked += 1;
+        savedLosses += s.losses;
+        missedWins += s.wins;
+        netImpact += -s.net;
+      }
+      if (isSessionBlocked(tf, slot, "pm")) {
+        const s = getStats(tf, slot, "pm");
+        totalBlocked += 1;
+        savedLosses += s.losses;
+        missedWins += s.wins;
+        netImpact += -s.net;
+      }
+    }
+  }
+
+  document.getElementById("sumBlocked").textContent = String(totalBlocked);
+  document.getElementById("sumSaved").textContent = savedLosses > 0 ? `${savedLosses} losses` : "--";
+  document.getElementById("sumMissed").textContent = missedWins > 0 ? `${missedWins} wins` : "--";
+
+  const netEl = document.getElementById("sumNet");
+  if (totalBlocked === 0) {
+    netEl.textContent = "--";
+    netEl.className = "value";
+  } else {
+    const sign = netImpact >= 0 ? "+" : "-";
+    netEl.textContent = `${sign}$${Math.abs(netImpact).toFixed(2)}`;
+    netEl.className = "value " + (netImpact >= 0 ? "green" : "red");
+  }
+}
+
+function render() {
+  render5mClock();
+  render15mSlots();
+  renderLongSlots();
+  renderSummary();
+}
+
+async function init() {
+  await loadBlackout();
+  render();
+  loadStats().then(() => render());
+  setInterval(() => render5mClock(), 30000);
+  setInterval(async () => {
+    await loadStats();
+    render();
+  }, 60000);
+}
+init();
+</script>
+</body>
+</html>
+

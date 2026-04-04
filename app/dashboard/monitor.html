@@ -1,0 +1,1390 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PolySnipe - Monitor Backtest</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --card: #1a1d26;
+      --ctrl-bg: #161920;
+      --text: #e0e0e0;
+      --dim: #888;
+      --accent: #f59e0b;
+      --green: #22c55e;
+      --red: #ef4444;
+      --border: #2a2d36;
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+    }
+
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+      background: transparent;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: transparent;
+      border-radius: 3px;
+    }
+
+    *:hover::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.12);
+    }
+
+    * {
+      scrollbar-width: thin;
+      scrollbar-color: transparent transparent;
+    }
+
+    *:hover {
+      scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 20px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+
+    h1 {
+      font-size: 1.3em;
+      font-weight: 600;
+    }
+
+    h1 span {
+      color: var(--accent);
+    }
+
+    .header-actions a {
+      color: var(--dim);
+      text-decoration: none;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 6px 10px;
+      margin-left: 8px;
+      font-size: 0.85rem;
+      background: var(--card);
+    }
+
+    .layout {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    .panel {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px;
+    }
+
+    .left {
+      width: 442px;
+      min-width: 424px;
+      flex-shrink: 0;
+      background: var(--ctrl-bg);
+      border-right: 1px solid var(--border);
+      overflow-y: auto;
+      overflow-x: hidden;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .left th,
+    .left td {
+      padding: 7px 6px;
+      font-size: 0.85rem;
+    }
+
+    .right {
+      flex: 1;
+      overflow-y: auto;
+      overflow-x: hidden;
+      padding: 16px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      min-height: 0;
+    }
+
+    .section-title {
+      font-size: 0.95em;
+      color: var(--accent);
+      font-weight: 600;
+      margin-bottom: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin: 6px 0;
+      gap: 8px;
+    }
+
+    .row label {
+      color: var(--text);
+      font-size: 0.86rem;
+    }
+
+    .row input,
+    .row select {
+      width: 128px;
+      background: #111622;
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      padding: 6px 8px;
+      text-align: right;
+    }
+
+    .check-row {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      margin-top: 6px;
+    }
+
+    .asset-tf-rows {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-top: 6px;
+    }
+
+    .asset-tf-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+    }
+
+    .chip {
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 5px 10px;
+      font-size: 0.78rem;
+      color: var(--dim);
+      cursor: pointer;
+      user-select: none;
+      background: #10151f;
+    }
+
+    .chip.on {
+      color: #04140a;
+      background: #3ee37c;
+      border-color: #3ee37c;
+      font-weight: 700;
+    }
+
+    .chip.gated {
+      color: #94a3b8;
+      background: #1a2334;
+      border-color: #334155;
+      font-weight: 600;
+    }
+
+    .btn {
+      width: 100%;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px;
+      background: var(--card);
+      color: #e5e7eb;
+      font-weight: 700;
+      cursor: pointer;
+      margin-top: 8px;
+    }
+
+    .btn.run {
+      background: #08361e;
+      border-color: #14532d;
+      color: #8ef3b4;
+    }
+
+    .btn.optimize {
+      background: #3a2b0b;
+      border-color: #5a4310;
+      color: #ffd37d;
+    }
+
+    .btn.muted {
+      background: #1a2334;
+      color: var(--dim);
+      font-weight: 600;
+    }
+
+    .btn.danger {
+      background: #3b0f15;
+      border-color: #6d1d28;
+      color: #ffb4c0;
+    }
+
+    .stats-row {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(122px, 1fr));
+      gap: 10px;
+    }
+
+    .stat-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 14px;
+    }
+
+    .k {
+      font-size: 0.72em;
+      color: var(--dim);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .v {
+      font-size: 1.4em;
+      font-weight: 700;
+      margin-top: 2px;
+    }
+
+    .module-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px;
+      overflow: visible;
+    }
+
+    .matrix-table {
+      table-layout: auto;
+      width: 100%;
+    }
+
+    .matrix-table th:first-child,
+    .matrix-table td:first-child {
+      min-width: 56px;
+      text-align: left;
+    }
+
+    .matrix-table th:not(:first-child),
+    .matrix-table td:not(:first-child) {
+      min-width: 54px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.82em;
+    }
+
+    th {
+      text-align: left;
+      color: var(--dim);
+      font-weight: 500;
+      padding: 6px;
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+    }
+
+    td {
+      padding: 6px;
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+      text-align: right;
+    }
+
+    th:first-child,
+    td:first-child {
+      text-align: left;
+    }
+
+    tr:last-child td {
+      border-bottom: none;
+    }
+
+    .barrier-input {
+      width: 100%;
+      background: #111622;
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      min-height: 32px;
+      padding: 6px 8px;
+      text-align: right;
+      font-size: 0.95rem;
+      line-height: 1.2;
+    }
+
+    .table-wrap,
+    .table-wrap-wide {
+      width: 100%;
+      overflow-x: auto;
+      overflow-y: visible;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #121722;
+    }
+
+    .table-wrap table,
+    .table-wrap-wide table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    .table-wrap th,
+    .table-wrap td,
+    .table-wrap-wide th,
+    .table-wrap-wide td {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .by-table {
+      table-layout: fixed;
+      min-width: 740px;
+    }
+
+    .by-table th:nth-child(1),
+    .by-table td:nth-child(1) {
+      width: 140px;
+    }
+
+    .by-table th:nth-child(2),
+    .by-table td:nth-child(2) {
+      width: 70px;
+    }
+
+    .hourly-table {
+      table-layout: fixed;
+      min-width: 860px;
+    }
+
+    .hourly-table th:nth-child(1),
+    .hourly-table td:nth-child(1) {
+      width: 170px;
+      text-align: left;
+    }
+
+    .hourly-table th:nth-child(2),
+    .hourly-table td:nth-child(2),
+    .hourly-table th:nth-child(3),
+    .hourly-table td:nth-child(3),
+    .hourly-table th:nth-child(4),
+    .hourly-table td:nth-child(4) {
+      width: 84px;
+      text-align: right;
+    }
+
+    .hourly-table th:nth-child(5),
+    .hourly-table td:nth-child(5),
+    .hourly-table th:nth-child(6),
+    .hourly-table td:nth-child(6),
+    .hourly-table th:nth-child(7),
+    .hourly-table td:nth-child(7),
+    .hourly-table th:nth-child(8),
+    .hourly-table td:nth-child(8) {
+      width: 100px;
+      text-align: right;
+    }
+
+    .opt-table {
+      table-layout: fixed;
+      min-width: 980px;
+    }
+
+    .opt-table th:nth-child(1),
+    .opt-table td:nth-child(1) {
+      width: 120px;
+      text-align: left;
+    }
+
+    .opt-table th:nth-child(2),
+    .opt-table td:nth-child(2),
+    .opt-table th:nth-child(3),
+    .opt-table td:nth-child(3) {
+      width: 110px;
+      text-align: right;
+    }
+
+    .opt-table th:nth-child(4),
+    .opt-table td:nth-child(4) {
+      width: 80px;
+      text-align: right;
+    }
+
+    .opt-table th:nth-child(5),
+    .opt-table td:nth-child(5) {
+      width: 90px;
+      text-align: right;
+    }
+
+    .opt-table th:nth-child(6),
+    .opt-table td:nth-child(6),
+    .opt-table th:nth-child(7),
+    .opt-table td:nth-child(7),
+    .opt-table th:nth-child(8),
+    .opt-table td:nth-child(8),
+    .opt-table th:nth-child(9),
+    .opt-table td:nth-child(9),
+    .opt-table th:nth-child(10),
+    .opt-table td:nth-child(10) {
+      width: 100px;
+      text-align: right;
+    }
+
+    .trade-table {
+      table-layout: fixed;
+      min-width: 1060px;
+    }
+
+    .trade-table th:nth-child(1),
+    .trade-table td:nth-child(1) {
+      width: 130px;
+      text-align: left;
+    }
+
+    .trade-table th:nth-child(2),
+    .trade-table td:nth-child(2) {
+      width: 380px;
+      text-align: left;
+    }
+
+    .trade-table th:nth-child(3),
+    .trade-table td:nth-child(3) {
+      width: 80px;
+      text-align: left;
+    }
+
+    .trade-table th:nth-child(4),
+    .trade-table td:nth-child(4) {
+      width: 58px;
+      text-align: left;
+    }
+
+    .trade-table th:nth-child(5),
+    .trade-table td:nth-child(5),
+    .trade-table th:nth-child(6),
+    .trade-table td:nth-child(6),
+    .trade-table th:nth-child(9),
+    .trade-table td:nth-child(9),
+    .trade-table th:nth-child(10),
+    .trade-table td:nth-child(10) {
+      width: 70px;
+      text-align: left;
+    }
+
+    .trade-table th:nth-child(7),
+    .trade-table td:nth-child(7) {
+      width: 82px;
+      text-align: right;
+    }
+
+    .trade-table th:nth-child(8),
+    .trade-table td:nth-child(8) {
+      width: 98px;
+      text-align: right;
+    }
+
+    .trade-table th:nth-child(11),
+    .trade-table td:nth-child(11) {
+      width: 82px;
+      text-align: right;
+    }
+
+    .left .barrier-input[type=number] {
+      -moz-appearance: textfield;
+      appearance: textfield;
+    }
+
+    .left .barrier-input[type=number]::-webkit-outer-spin-button,
+    .left .barrier-input[type=number]::-webkit-inner-spin-button {
+      -webkit-appearance: none;
+      margin: 0;
+    }
+
+    .green {
+      color: var(--green);
+    }
+
+    .red {
+      color: var(--red);
+    }
+
+    .dim {
+      color: var(--dim);
+    }
+
+    .hint {
+      font-size: 0.76rem;
+      color: var(--dim);
+      margin-top: 4px;
+      line-height: 1.4;
+    }
+
+    .mode-disabled {
+      opacity: 0.45;
+      pointer-events: none;
+      filter: saturate(0.7);
+    }
+
+    @media (max-width: 1200px) {
+      body {
+        overflow: auto;
+      }
+
+      .layout {
+        flex-direction: column;
+      }
+
+      .left {
+        width: 100%;
+        min-width: 100%;
+        border-right: none;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .right {
+        padding: 14px;
+      }
+
+      .stats-row {
+        grid-template-columns: repeat(2, minmax(120px, 1fr));
+      }
+
+      .table-wrap-wide table {
+        min-width: 980px;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <header>
+    <h1>Poly<span>Snipe</span> Monitor Backtest</h1>
+    <div class="header-actions">
+      <a href="/">Main Dashboard</a>
+      <a href="/clock">Clock</a>
+    </div>
+  </header>
+
+  <div class="layout">
+    <div class="left">
+      <div class="panel">
+        <div class="section-title">Inputs</div>
+        <div class="row"><label>Hours window</label><input id="inHours" type="number" min="1" max="8760" value="24" onchange="_saveMonitorOptimizerPrefs()"></div>
+        <div class="row"><label>Optimizer objective</label><select id="inObjective" onchange="_saveMonitorOptimizerPrefs()"><option value="pnl">PnL</option><option value="win_rate">Win Rate</option><option value="roi">ROI %</option></select></div>
+        <div class="row"><label>Min trades (R)</label><input id="inMinTrades" type="number" min="0" max="100000" value="0" onchange="_saveMonitorOptimizerPrefs()"></div>
+        <div class="row sim-only"><label>Max bet ($)</label><input id="inBet" type="number" step="0.01" min="0.01" value="1"></div>
+        <div class="row sim-only"><label>Max price ($)</label><input id="inPrice" type="number" step="0.01" min="0.01" max="0.99" value="0.67"></div>
+        <div class="row sim-only"><label>Muzzle (s)</label><input id="inMuzzle" type="number" min="0" max="600" value="90"></div>
+        <div class="row sim-only"><label>Start delay (s)</label><input id="inStartDelay" type="number" min="0" max="300" value="10"></div>
+        <div class="row sim-only"><label>Armed WS-Instant</label><select id="inArmed"><option value="1">ON</option><option value="0">OFF</option></select></div>
+        <div class="row sim-only"><label>Require depth >= bet</label><select id="inDepth"><option value="1">ON</option><option value="0">OFF</option></select></div>
+        <div class="hint" id="modeHint" style="color:#94a3b8;">Mode: backtest from collected monitor data.</div>
+      </div>
+
+      <div class="panel">
+        <div class="section-title">Asset Timeframes</div>
+        <div class="asset-tf-rows" id="assetTfRows"></div>
+        <div class="section-title" style="margin-top:10px;">Global Timeframes</div>
+        <div class="check-row" id="tfChips"></div>
+      </div>
+
+      <div class="panel sim-only" id="barrierPanel">
+        <div class="section-title">Barrier Matrix (% gap)</div>
+        <table class="matrix-table">
+          <thead>
+            <tr>
+              <th>Asset</th>
+              <th>5m</th>
+              <th>15m</th>
+              <th>1h</th>
+              <th>4h</th>
+              <th>1d</th>
+            </tr>
+          </thead>
+          <tbody id="barrierBody"></tbody>
+        </table>
+      </div>
+
+      <div class="panel sim-only" id="pricePanel">
+        <div class="section-title">Max Price Matrix ($ cap)</div>
+        <table class="matrix-table">
+          <thead>
+            <tr>
+              <th>Asset</th>
+              <th>5m</th>
+              <th>15m</th>
+              <th>1h</th>
+              <th>4h</th>
+              <th>1d</th>
+            </tr>
+          </thead>
+          <tbody id="priceBody"></tbody>
+        </table>
+      </div>
+
+      <div class="panel">
+        <button class="btn muted" onclick="loadDefaults()">Load Runtime Defaults</button>
+        <button class="btn optimize" onclick="findOptimizedInputs()">Find Optimized Inputs</button>
+        <button class="btn run" onclick="runBacktest()">Run Backtest With Inputs</button>
+        <div class="hint" id="runMeta">Ready</div>
+      </div>
+
+      <div class="panel">
+        <div class="section-title">Danger Zone</div>
+        <button class="btn danger" onclick="wipeMonitorData()">Wipe Monitor DB</button>
+        <div class="hint">Clears monitor tables only (`ticks`, `monitor_v2_samples`, `monitor_v2_markets`).</div>
+      </div>
+    </div>
+
+    <div class="right">
+      <div class="stats-row">
+        <div class="stat-card"><div class="k" id="sTradesLabel">Fills</div><div class="v" id="sTrades">0</div></div>
+        <div class="stat-card"><div class="k">Win / Loss</div><div class="v" id="sWL">0 / 0</div></div>
+        <div class="stat-card"><div class="k">Win Rate</div><div class="v" id="sWR">0.0%</div></div>
+        <div class="stat-card"><div class="k" id="sOpenLabel">No Fill</div><div class="v" id="sOpen">0</div></div>
+        <div class="stat-card"><div class="k">Spent</div><div class="v" id="sSpent">$0.00</div></div>
+        <div class="stat-card"><div class="k">PnL</div><div class="v" id="sPnl">$0.00</div></div>
+        <div class="stat-card"><div class="k">ROI</div><div class="v" id="sRoi">0.0%</div></div>
+        <div class="stat-card"><div class="k" id="sRowsLabel">Springs</div><div class="v" id="sRows">0</div></div>
+      </div>
+
+      <div class="module-card">
+        <div class="section-title" id="optTitle">Optimized Inputs (Enabled Cells)</div>
+        <div class="table-wrap">
+          <table class="opt-table">
+            <thead>
+              <tr id="optHeadRow"></tr>
+            </thead>
+            <tbody id="optBody"><tr><td colspan="10" class="dim">Click "Find Optimized Inputs" to compute best inputs.</td></tr></tbody>
+          </table>
+        </div>
+        <div class="hint" id="optMeta">Ready</div>
+      </div>
+
+      <div class="module-card">
+        <div class="section-title" id="byTitle">By Asset / Timeframe (Live)</div>
+        <div class="table-wrap">
+          <table class="by-table">
+            <thead>
+              <tr id="byHeadRow"></tr>
+            </thead>
+            <tbody id="byBody"><tr><td colspan="11" class="dim">No backtest results yet</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="module-card">
+        <div class="section-title" id="hourlyTitle">Hourly Performance (ET)</div>
+        <div class="table-wrap">
+          <table class="hourly-table">
+            <thead>
+              <tr id="hourlyHeadRow"></tr>
+            </thead>
+            <tbody id="hourlyBody"><tr><td colspan="8" class="dim">Run backtest to view hourly buckets</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="module-card">
+        <div class="section-title" id="tradeTitle">Backtest Trades</div>
+        <div class="table-wrap-wide">
+          <table class="trade-table">
+            <thead>
+              <tr id="tradeHeadRow"></tr>
+            </thead>
+            <tbody id="tradeBody"><tr><td colspan="12" class="dim">No backtest results yet</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const ASSETS = ['bitcoin', 'ethereum', 'solana', 'xrp'];
+    const TFS = ['5m', '15m', '1h', '4h', '1d'];
+    const ASSET_CODE = { bitcoin: 'BTC', ethereum: 'ETH', solana: 'SOL', xrp: 'XRP' };
+    const TF_ALIAS = { '24h': '1d', '1d': '1d', '5m': '5m', '15m': '15m', '1h': '1h', '4h': '4h' };
+    let selectedAssets = new Set(ASSETS);
+    let selectedTfs = new Set(TFS);
+    let selectedAssetTf = {};
+
+    const $ = id => document.getElementById(id);
+    const fmtMoney = n => '$' + Number(n || 0).toFixed(2);
+    const fmtPct = n => Number(n || 0).toFixed(2) + '%';
+    const normalizeTf = tf => TF_ALIAS[String(tf || '').toLowerCase()] || String(tf || '').toLowerCase();
+    const shortAsset = a => ASSET_CODE[String(a || '').toLowerCase()] || String(a || '').toUpperCase();
+    const shortenText = (s, max = 44) => {
+      const v = String(s || '');
+      if (v.length <= max) return v;
+      return v.slice(0, Math.max(0, max - 3)) + '...';
+    };
+    const compactTs = ts => {
+      const s = String(ts || '').trim();
+      if (!s) return '--';
+      let d = new Date(s);
+      if (isNaN(d)) {
+        // Fallback for naive timestamps without timezone marker.
+        d = new Date(s.replace(' ', 'T') + 'Z');
+      }
+      if (isNaN(d)) return s;
+      const et = d.toLocaleString('en-US', {
+        timeZone: 'America/New_York',
+        month: '2-digit',
+        day: '2-digit',
+        hour: 'numeric',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: true,
+      }).replace(',', '');
+      return `${et} ET`;
+    };
+    const pnlClass = n => (n > 0 ? 'green' : (n < 0 ? 'red' : 'dim'));
+    const OPT_PREFS_KEY = 'poly_monitor_optimizer_prefs_v1';
+
+    function _sanitizeObjectiveMode(raw) {
+      const v = String(raw || '').trim().toLowerCase();
+      return ['pnl', 'win_rate', 'roi'].includes(v) ? v : 'pnl';
+    }
+
+    function _clampLookbackHours(raw) {
+      const n = Number(raw);
+      if (!Number.isFinite(n)) return 24;
+      return Math.max(1, Math.min(8760, Math.round(n)));
+    }
+
+    function _clampMinTrades(raw) {
+      const n = Number(raw);
+      if (!Number.isFinite(n)) return 0;
+      return Math.max(0, Math.min(100000, Math.round(n)));
+    }
+
+    function _sampleConfidence(trades) {
+      const n = Number(trades || 0);
+      if (n < 10) return { label: 'LOW !', color: 'var(--red)' };
+      if (n < 30) return { label: 'MED', color: 'var(--yellow)' };
+      return { label: 'HIGH', color: 'var(--green)' };
+    }
+
+    function _saveMonitorOptimizerPrefs() {
+      try {
+        const payload = {
+          hours: _clampLookbackHours($('inHours')?.value ?? 24),
+          objective_mode: _sanitizeObjectiveMode($('inObjective')?.value || 'pnl'),
+          min_trades: _clampMinTrades($('inMinTrades')?.value ?? 0),
+        };
+        localStorage.setItem(OPT_PREFS_KEY, JSON.stringify(payload));
+      } catch (_) { }
+    }
+
+    function _loadMonitorOptimizerPrefs() {
+      try {
+        const raw = localStorage.getItem(OPT_PREFS_KEY);
+        if (!raw) return {};
+        const p = JSON.parse(raw);
+        if (!p || typeof p !== 'object') return {};
+        return {
+          hours: _clampLookbackHours(p.hours),
+          objective_mode: _sanitizeObjectiveMode(p.objective_mode),
+          min_trades: _clampMinTrades(p.min_trades),
+        };
+      } catch (_) {
+        return {};
+      }
+    }
+
+    function _defaultAssetTfEnabled() {
+      const out = {};
+      ASSETS.forEach(asset => {
+        out[asset] = {};
+        TFS.forEach(tf => {
+          out[asset][tf] = selectedAssets.has(asset) && selectedTfs.has(tf);
+        });
+      });
+      return out;
+    }
+
+    function _normalizeAssetTfEnabled(incoming) {
+      const out = _defaultAssetTfEnabled();
+      if (!incoming || typeof incoming !== 'object') return out;
+      ASSETS.forEach(asset => {
+        const row = incoming[asset];
+        if (!row || typeof row !== 'object') return;
+        TFS.forEach(tf => {
+          if (row[tf] !== undefined) out[asset][tf] = !!row[tf];
+        });
+      });
+      return out;
+    }
+
+    function _effectiveCellEnabled(asset, tf) {
+      return selectedAssets.has(asset) && selectedTfs.has(tf) && !!selectedAssetTf?.[asset]?.[tf];
+    }
+
+    function _effectiveEnabledCellsList() {
+      const out = [];
+      TFS.forEach(tf => {
+        ASSETS.forEach(asset => {
+          if (_effectiveCellEnabled(asset, tf)) out.push(`${asset}:${tf}`);
+        });
+      });
+      return out;
+    }
+
+    function _chip(label, on, onClick, gated = false) {
+      const d = document.createElement('div');
+      d.className = 'chip' + (on ? ' on' : '') + (gated ? ' gated' : '');
+      d.textContent = String(label || '').toUpperCase();
+      d.onclick = onClick;
+      return d;
+    }
+
+    function renderAssetTfRows() {
+      const rows = $('assetTfRows');
+      rows.innerHTML = '';
+      ASSETS.forEach(asset => {
+        const row = document.createElement('div');
+        row.className = 'asset-tf-row';
+        row.appendChild(_chip(shortAsset(asset), selectedAssets.has(asset), () => {
+          if (selectedAssets.has(asset)) selectedAssets.delete(asset);
+          else selectedAssets.add(asset);
+          renderAssetTfRows();
+        }));
+        TFS.forEach(tf => {
+          const cellOn = !!selectedAssetTf?.[asset]?.[tf];
+          const effectiveOn = _effectiveCellEnabled(asset, tf);
+          row.appendChild(_chip(tf, cellOn, () => {
+            if (!selectedAssetTf[asset]) selectedAssetTf[asset] = {};
+            selectedAssetTf[asset][tf] = !selectedAssetTf[asset][tf];
+            renderAssetTfRows();
+          }, cellOn && !effectiveOn));
+        });
+        rows.appendChild(row);
+      });
+    }
+
+    function renderGlobalTfChips() {
+      const t = $('tfChips');
+      t.innerHTML = '';
+      TFS.forEach(tf => {
+        t.appendChild(_chip(tf, selectedTfs.has(tf), () => {
+          if (selectedTfs.has(tf)) selectedTfs.delete(tf);
+          else selectedTfs.add(tf);
+          renderGlobalTfChips();
+          renderAssetTfRows();
+        }));
+      });
+    }
+
+    function buildChips() {
+      renderAssetTfRows();
+      renderGlobalTfChips();
+    }
+
+    function buildBarrierMatrix(barriers) {
+      const body = $('barrierBody');
+      body.innerHTML = '';
+      ASSETS.forEach(asset => {
+        const tr = document.createElement('tr');
+        const tdAsset = document.createElement('td');
+        tdAsset.textContent = shortAsset(asset);
+        tr.appendChild(tdAsset);
+        TFS.forEach(tf => {
+          const td = document.createElement('td');
+          const inp = document.createElement('input');
+          inp.type = 'number';
+          inp.step = '0.001';
+          inp.min = '0';
+          inp.max = '5';
+          inp.className = 'barrier-input';
+          inp.id = `bar_${asset}_${tf}`;
+          const v = Number((barriers?.[asset]?.[tf]) ?? 0.05);
+          inp.value = Number.isFinite(v) ? v.toFixed(3).replace(/0+$/, '').replace(/\.$/, '') : '0.05';
+          td.appendChild(inp);
+          tr.appendChild(td);
+        });
+        body.appendChild(tr);
+      });
+    }
+
+    function getBarrierPayload() {
+      const out = {};
+      ASSETS.forEach(asset => {
+        out[asset] = {};
+        TFS.forEach(tf => {
+          const el = $(`bar_${asset}_${tf}`);
+          const n = Number(el?.value ?? 0.05);
+          out[asset][tf] = Number.isFinite(n) ? n : 0.05;
+        });
+      });
+      return out;
+    }
+
+    function buildMaxPriceMatrix(maxPrices) {
+      const body = $('priceBody');
+      body.innerHTML = '';
+      ASSETS.forEach(asset => {
+        const tr = document.createElement('tr');
+        const tdAsset = document.createElement('td');
+        tdAsset.textContent = shortAsset(asset);
+        tr.appendChild(tdAsset);
+        TFS.forEach(tf => {
+          const td = document.createElement('td');
+          const inp = document.createElement('input');
+          inp.type = 'number';
+          inp.step = '0.01';
+          inp.min = '0.01';
+          inp.max = '0.99';
+          inp.className = 'barrier-input';
+          inp.id = `px_${asset}_${tf}`;
+          const fallback = Number($('inPrice')?.value ?? 0.67);
+          const v = Number((maxPrices?.[asset]?.[tf]) ?? fallback);
+          inp.value = Number.isFinite(v) ? v.toFixed(2).replace(/0+$/, '').replace(/\.$/, '') : '0.67';
+          td.appendChild(inp);
+          tr.appendChild(td);
+        });
+        body.appendChild(tr);
+      });
+    }
+
+    function getMaxPricePayload() {
+      const out = {};
+      const fallback = Number($('inPrice')?.value ?? 0.67);
+      ASSETS.forEach(asset => {
+        out[asset] = {};
+        TFS.forEach(tf => {
+          const el = $(`px_${asset}_${tf}`);
+          const n = Number(el?.value ?? fallback);
+          out[asset][tf] = Number.isFinite(n) ? n : fallback;
+        });
+      });
+      return out;
+    }
+
+    function setSummaryCardPnl(id, val) {
+      const el = $(id);
+      el.textContent = fmtMoney(val || 0);
+      el.className = 'v ' + ((val || 0) >= 0 ? 'green' : 'red');
+    }
+
+    function setSummaryCardPct(id, val) {
+      const el = $(id);
+      el.textContent = fmtPct(val || 0);
+      el.className = 'v ' + ((val || 0) >= 0 ? 'green' : 'red');
+    }
+
+    function setModeHeaders() {
+      $('modeHint').textContent = 'Mode: backtest from collected monitor data using your inputs.';
+      $('modeHint').style.color = '#94a3b8';
+      $('sTradesLabel').textContent = 'Trades';
+      $('sOpenLabel').textContent = 'Open';
+      $('sRowsLabel').textContent = 'Rows Scanned';
+      $('optTitle').textContent = 'Optimized Inputs (Enabled Cells)';
+      $('byTitle').textContent = 'By Asset / Timeframe (Backtest)';
+      $('hourlyTitle').textContent = 'Hourly Performance (ET)';
+      $('tradeTitle').textContent = 'Backtest Trades';
+      $('optHeadRow').innerHTML = `
+        <th>Cell</th>
+        <th>Current (b/p/pnl)</th>
+        <th>Recommended (b/p/pnl)</th>
+        <th>Delta</th>
+        <th>Trades R/C</th>
+        <th>Conf (R)</th>
+        <th>W/L (R)</th>
+        <th>Win% (R)</th>
+        <th>Spent (R)</th>
+        <th>ROI% (R)</th>
+      `;
+      $('byHeadRow').innerHTML = `
+        <th>Asset</th>
+        <th>TF</th>
+        <th>Trades</th>
+        <th>W/L</th>
+        <th>Win%</th>
+        <th>Spent</th>
+        <th>PnL</th>
+        <th>ROI%</th>
+      `;
+      $('hourlyHeadRow').innerHTML = `
+        <th>ET Hour</th>
+        <th>Trades</th>
+        <th>W</th>
+        <th>L</th>
+        <th>Win%</th>
+        <th>Spent</th>
+        <th>PnL</th>
+        <th>ROI%</th>
+      `;
+      $('tradeHeadRow').innerHTML = `
+        <th>Time</th>
+        <th>Market</th>
+        <th>Asset</th>
+        <th>TF</th>
+        <th>Path</th>
+        <th>Side</th>
+        <th>Entry</th>
+        <th>Arm->Entry</th>
+        <th>Winner</th>
+        <th>Result</th>
+        <th>PnL</th>
+      `;
+    }
+
+    function setModeUI() {
+      const simEls = document.querySelectorAll('.sim-only');
+      simEls.forEach(el => el.classList.remove('mode-disabled'));
+    }
+
+    function buildPayload(includeSimulationInputs) {
+      const enabledCells = _effectiveEnabledCellsList();
+      const payload = {
+        hours: Number($('inHours').value || 24),
+        objective_mode: _sanitizeObjectiveMode($('inObjective').value || 'pnl'),
+        min_trades: _clampMinTrades($('inMinTrades')?.value ?? 0),
+        assets: [...selectedAssets],
+        timeframes: [...selectedTfs],
+        asset_timeframe_enabled: selectedAssetTf,
+        enabled_cells: enabledCells,
+      };
+      if (!includeSimulationInputs) {
+        return payload;
+      }
+      payload.max_bet = Number($('inBet').value || 1);
+      payload.max_price = Number($('inPrice').value || 0.67);
+      payload.muzzle_seconds = Number($('inMuzzle').value || 90);
+      payload.start_delay_seconds = Number($('inStartDelay').value || 10);
+      payload.armed_sniper = $('inArmed').value === '1';
+      payload.require_depth = $('inDepth').value === '1';
+      payload.barriers = getBarrierPayload();
+      payload.max_prices = getMaxPricePayload();
+      return payload;
+    }
+
+    function renderOptimizer(d) {
+      const body = $('optBody');
+      const meta = $('optMeta');
+      const minTrades = _clampMinTrades($('inMinTrades')?.value ?? 0);
+      const rowsRaw = Array.isArray(d?.results) ? d.results : [];
+      const rows = rowsRaw.filter(r => {
+        const asset = String(r?.asset || '').toLowerCase();
+        const tf = normalizeTf(r?.timeframe);
+        return _effectiveCellEnabled(asset, tf);
+      });
+      if (!rows.length) {
+        body.innerHTML = '<tr><td colspan="10" class="dim">No enabled cells to optimize.</td></tr>';
+        meta.textContent = 'No enabled cells to optimize.';
+        return;
+      }
+      body.innerHTML = rows.map(r => {
+        const cur = r.current || {};
+        const rec = r.recommended || {};
+        const curS = cur.summary || {};
+        const recS = rec.summary || {};
+        const delta = Number((r.delta_pnl != null ? r.delta_pnl : (Number(recS.pnl || 0) - Number(curS.pnl || 0))) || 0);
+        const conf = _sampleConfidence(recS.trades || 0);
+        return `
+          <tr>
+            <td>${shortAsset(r.asset || '')} ${r.timeframe || ''}</td>
+            <td>${Number(cur.barrier_pct || 0).toFixed(3)} / ${Number(cur.max_price || 0).toFixed(2)} / <span class="${pnlClass(Number(curS.pnl || 0))}">${fmtMoney(Number(curS.pnl || 0))}</span></td>
+            <td>${Number(rec.barrier_pct || 0).toFixed(3)} / ${Number(rec.max_price || 0).toFixed(2)} / <span class="${pnlClass(Number(recS.pnl || 0))}">${fmtMoney(Number(recS.pnl || 0))}</span></td>
+            <td class="${pnlClass(delta)}">${fmtMoney(delta)}</td>
+            <td>${Number(recS.trades || 0)} / ${Number(curS.trades || 0)}</td>
+            <td style="color:${conf.color}">${conf.label}</td>
+            <td>${Number(recS.won || 0)}/${Number(recS.lost || 0)}</td>
+            <td>${fmtPct(Number(recS.win_rate_pct || 0))}</td>
+            <td>${fmtMoney(Number(recS.spent || 0))}</td>
+            <td class="${pnlClass(Number(recS.roi_pct || 0))}">${fmtPct(Number(recS.roi_pct || 0))}</td>
+          </tr>
+        `;
+      }).join('');
+
+      const totals = d.totals || {};
+      const reco = totals.recommended || {};
+      const deltaTotal = Number(totals.delta_pnl || 0);
+      const objective = _sanitizeObjectiveMode(d.objective_mode || d.current_config?.objective_mode || $('inObjective').value || 'pnl');
+      meta.innerHTML = `
+        objective ${objective} | window ${Number(d.hours_window || 0)}h |
+        cells ${rows.length}/${Number(d.cells_optimized || rowsRaw.length)} |
+        min trades ${minTrades} |
+        markets ${Number(totals.markets_sampled || 0)} |
+        rows ${Number(totals.rows_scanned || 0)} |
+        best pnl <span class="${pnlClass(Number(reco.pnl || 0))}">${fmtMoney(Number(reco.pnl || 0))}</span> |
+        delta <span class="${pnlClass(deltaTotal)}">${fmtMoney(deltaTotal)}</span>
+      `;
+    }
+
+    async function loadDefaults() {
+      const r = await fetch('/api/monitor/sim-defaults');
+      const d = await r.json();
+      if (!d.ok) return;
+      const x = d.defaults || {};
+      const prefs = _loadMonitorOptimizerPrefs();
+      $('inHours').value = prefs.hours ?? (x.hours ?? 24);
+      $('inObjective').value = prefs.objective_mode ?? _sanitizeObjectiveMode(x.objective_mode || 'pnl');
+      $('inMinTrades').value = String(prefs.min_trades ?? 0);
+      $('inBet').value = x.max_bet ?? 1;
+      $('inPrice').value = x.max_price ?? 0.67;
+      $('inMuzzle').value = x.muzzle_seconds ?? 90;
+      $('inStartDelay').value = x.start_delay_seconds ?? 10;
+      $('inArmed').value = x.armed_sniper ? '1' : '0';
+      $('inDepth').value = x.require_depth ? '1' : '0';
+      selectedAssets = new Set(Array.isArray(x.assets) ? x.assets : ASSETS);
+      selectedTfs = new Set(Array.isArray(x.timeframes) ? x.timeframes : TFS);
+      selectedAssetTf = _normalizeAssetTfEnabled(x.asset_timeframe_enabled || {});
+      buildChips();
+      buildBarrierMatrix(x.barriers || {});
+      buildMaxPriceMatrix(x.max_prices || {});
+      _saveMonitorOptimizerPrefs();
+      $('runMeta').textContent = 'Defaults loaded';
+    }
+
+    async function runBacktest() {
+      _saveMonitorOptimizerPrefs();
+      if (!selectedAssets.size) {
+        $('runMeta').textContent = 'Select at least one asset';
+        return;
+      }
+      if (!selectedTfs.size) {
+        $('runMeta').textContent = 'Select at least one timeframe';
+        return;
+      }
+      setModeHeaders();
+      setModeUI();
+      const payload = buildPayload(true);
+      $('runMeta').textContent = 'Running monitor backtest...';
+      const t0 = performance.now();
+      try {
+        const r = await fetch('/api/monitor/simulate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const d = await r.json();
+        if (!d.ok) {
+          $('runMeta').textContent = d.message || 'Backtest failed';
+          return;
+        }
+        renderBacktest(d);
+        const dt = ((performance.now() - t0) / 1000).toFixed(2);
+        const shown = Number(d.trades_returned || 0);
+        const total = Number(d.trades_total || 0);
+        $('runMeta').textContent =
+          `Done in ${dt}s | markets ${d.markets_sampled || 0} | rows ${d.rows_scanned || 0} | trades ${d.summary?.trades || 0} (showing ${shown}/${total})`;
+      } catch (e) {
+        $('runMeta').textContent = `Backtest failed: ${e?.message || e}`;
+      }
+    }
+
+    async function findOptimizedInputs() {
+      _saveMonitorOptimizerPrefs();
+      if (!selectedAssets.size) {
+        $('runMeta').textContent = 'Select at least one asset';
+        return;
+      }
+      if (!selectedTfs.size) {
+        $('runMeta').textContent = 'Select at least one timeframe';
+        return;
+      }
+      setModeHeaders();
+      setModeUI();
+      const payload = buildPayload(true);
+      $('runMeta').textContent = 'Finding optimized inputs...';
+      $('optMeta').textContent = 'Running optimizer...';
+      const t0 = performance.now();
+      try {
+        const r = await fetch('/api/monitor/optimize-v2', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const d = await r.json();
+        if (!d.ok) {
+          $('runMeta').textContent = d.message || 'Optimizer failed';
+          $('optMeta').textContent = d.message || 'Optimizer failed';
+          return;
+        }
+        renderOptimizer(d);
+        const dt = ((performance.now() - t0) / 1000).toFixed(2);
+        $('runMeta').textContent =
+          `Optimizer done in ${dt}s | cells ${d.cells_optimized || 0} | markets ${d.totals?.markets_sampled || 0} | rows ${d.totals?.rows_scanned || 0}`;
+      } catch (e) {
+        const msg = `Optimizer failed: ${e?.message || e}`;
+        $('runMeta').textContent = msg;
+        $('optMeta').textContent = msg;
+      }
+    }
+
+    async function wipeMonitorData() {
+      const answer = prompt(
+        'This will DELETE monitor DB data only (`ticks`, `monitor_v2_samples`, `monitor_v2_markets`).\n\nType YES to confirm:'
+      );
+      if (answer !== 'YES') {
+        $('runMeta').textContent = 'Monitor wipe cancelled';
+        return;
+      }
+      try {
+        const r = await fetch('/api/control/flush-monitor', { method: 'POST' });
+        const d = await r.json();
+        if (d.ok) {
+          $('runMeta').textContent = `Monitor wipe complete: ${d.message || ''}`;
+        } else {
+          $('runMeta').textContent = d.message || 'Monitor wipe failed';
+        }
+      } catch (e) {
+        $('runMeta').textContent = `Monitor wipe failed: ${e?.message || e}`;
+      }
+    }
+
+    function renderBacktest(d) {
+      const s = d.summary || {};
+      $('sTrades').textContent = s.trades || 0;
+      $('sWL').textContent = `${s.won || 0} / ${s.lost || 0}`;
+      $('sWR').textContent = fmtPct(s.win_rate_pct || 0);
+      $('sOpen').textContent = s.open || 0;
+      $('sSpent').textContent = fmtMoney(s.spent || 0);
+      setSummaryCardPnl('sPnl', s.pnl || 0);
+      setSummaryCardPct('sRoi', s.roi_pct || 0);
+      $('sRows').textContent = d.rows_scanned || 0;
+
+      const byRaw = Array.isArray(d.by_asset_tf) ? d.by_asset_tf : [];
+      const byMap = new Map();
+      byRaw.forEach(x => {
+        const asset = String(x.asset || '').toLowerCase();
+        const tf = normalizeTf(x.timeframe);
+        if (!asset || !tf) return;
+        byMap.set(`${asset}|${tf}`, {
+          asset,
+          timeframe: tf,
+          trades: Number(x.trades || 0),
+          won: Number(x.won || 0),
+          lost: Number(x.lost || 0),
+          win_rate_pct: Number(x.win_rate_pct || 0),
+          spent: Number(x.spent || 0),
+          pnl: Number(x.pnl || 0),
+          roi_pct: Number(x.roi_pct || 0),
+        });
+      });
+      const by = [];
+      TFS.forEach(tf => {
+        if (!selectedTfs.has(tf)) return;
+        ASSETS.forEach(asset => {
+          if (!selectedAssets.has(asset)) return;
+          if (!selectedAssetTf?.[asset]?.[tf]) return;
+          const k = `${asset}|${tf}`;
+          by.push(byMap.get(k) || {
+            asset,
+            timeframe: tf,
+            trades: 0,
+            won: 0,
+            lost: 0,
+            win_rate_pct: 0,
+            spent: 0,
+            pnl: 0,
+            roi_pct: 0,
+          });
+        });
+      });
+      const byBody = $('byBody');
+      if (!by.length) {
+        byBody.innerHTML = '<tr><td colspan="8" class="dim">No backtest rows</td></tr>';
+      } else {
+        byBody.innerHTML = by.map(x => `
+          <tr>
+            <td>${(x.asset || '').toUpperCase()}</td>
+            <td>${x.timeframe || ''}</td>
+            <td>${x.trades || 0}</td>
+            <td>${x.won || 0}/${x.lost || 0}</td>
+            <td>${fmtPct(x.win_rate_pct || 0)}</td>
+            <td>${fmtMoney(x.spent || 0)}</td>
+            <td class="${pnlClass(x.pnl || 0)}">${fmtMoney(x.pnl || 0)}</td>
+            <td class="${pnlClass(x.roi_pct || 0)}">${fmtPct(x.roi_pct || 0)}</td>
+          </tr>
+        `).join('');
+      }
+
+      const hourlyBody = $('hourlyBody');
+      const hourlyRows = Array.isArray(d.hourly_et) ? d.hourly_et : [];
+      if (!hourlyRows.length) {
+        hourlyBody.innerHTML = '<tr><td colspan="8" class="dim">No hourly buckets yet</td></tr>';
+      } else {
+        hourlyBody.innerHTML = hourlyRows.map(h => {
+          const won = Number(h.won || 0);
+          const lost = Number(h.lost || 0);
+          const pnl = Number(h.pnl || 0);
+          const roi = Number(h.roi_pct || 0);
+          return `
+            <tr>
+              <td>${h.label_et || '--'}</td>
+              <td>${Number(h.trades || 0)}</td>
+              <td>${won}</td>
+              <td>${lost}</td>
+              <td>${fmtPct(Number(h.win_rate_pct || 0))}</td>
+              <td>${fmtMoney(Number(h.spent || 0))}</td>
+              <td class="${pnlClass(pnl)}">${fmtMoney(pnl)}</td>
+              <td class="${pnlClass(roi)}">${fmtPct(roi)}</td>
+            </tr>
+          `;
+        }).join('');
+      }
+
+      const trades = d.trades || [];
+      const tBody = $('tradeBody');
+      if (!trades.length) {
+        tBody.innerHTML = '<tr><td colspan="11" class="dim">No backtest trades</td></tr>';
+      } else {
+        tBody.innerHTML = trades.map(t => `
+          <tr>
+            <td title="${compactTs(t.entry_ts || '')}">${compactTs(t.entry_ts || '')}</td>
+            <td title="${t.event_title || ''}">${shortenText(t.event_title || '', 56)}</td>
+            <td>${shortAsset(t.asset || '')}</td>
+            <td>${t.timeframe || ''}</td>
+            <td>${t.path || ''}</td>
+            <td>${t.side || ''}</td>
+            <td>${t.entry_price ? Number(t.entry_price).toFixed(4) : '--'}</td>
+            <td>${t.arm_to_entry_s == null ? '--' : Number(t.arm_to_entry_s).toFixed(1) + 's'}</td>
+            <td>${t.winner || '--'}</td>
+            <td class="${t.result === 'won' ? 'green' : (t.result === 'lost' ? 'red' : 'dim')}">${t.result || '--'}</td>
+            <td class="${pnlClass(t.pnl || 0)}">${fmtMoney(t.pnl || 0)}</td>
+          </tr>
+        `).join('');
+      }
+    }
+
+    setModeHeaders();
+    setModeUI();
+    buildChips();
+    buildBarrierMatrix({});
+    buildMaxPriceMatrix({});
+    loadDefaults();
+  </script>
+</body>
+
+</html>
+

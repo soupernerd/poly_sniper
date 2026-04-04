@@ -1,0 +1,43 @@
+.dev/
+.env
+.env.*
+*/.env
+!.env.example
+!*/.env.example
+.bak/
+.venv/
+app/.venv/
+.bak/.venv/
+.vscode/
+.node_modules/
+.npm_cache/
+.yarn_cache/
+.pnpm_cache/
+.bun_cache/
+.cache/
+marge-simpson/
+marge-prompts/
+wallets/
+copy_trade_ref/
+start-tunnel.bat
+stop-tunnel.bat
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+
+# Database
+data/
+app/data/
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+*.lock
+
+# Logs
+logs/
+app/logs/
+*.log

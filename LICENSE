@@ -1,0 +1,51 @@
+PolySnipe Community Non-Commercial Share-Alike License v1.0
+
+Copyright (c) 2026 PolySnipe contributors
+
+1) Grant of Rights (Non-Commercial Only)
+Permission is granted to use, copy, modify, and redistribute this software and
+its source code only for non-commercial purposes, subject to this License.
+
+2) Non-Commercial Restriction
+You may not use this software, or any modified version of it, for commercial
+advantage or monetary compensation without a separate commercial license.
+Commercial use includes (without limitation):
+- selling access, subscriptions, services, or hosted deployments,
+- using it in a business offering, client work, or paid consulting deliverable,
+- bundling it in a paid product or service.
+
+3) Share-Alike + Source Availability Requirement
+If you distribute this software (or a modified version), OR make it available to
+others as a networked service, you must:
+- provide complete corresponding source code for your version (including your
+  modifications, build/setup scripts, and dependency declarations),
+- license that version under this same License,
+- keep attribution and copyright notices intact,
+- clearly mark your modifications and dates.
+
+4) No Additional Restrictions
+You may not impose legal or technical restrictions that prevent recipients from
+exercising the rights granted by this License.
+
+5) Commercial Licensing
+Commercial use is available only under a separate paid commercial license.
+See COMMERCIAL_LICENSE.md.
+
+6) Trademarks
+This License does not grant rights to use project names, logos, or trademarks
+except as needed for truthful attribution.
+
+7) Disclaimer of Warranty
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT.
+
+8) Limitation of Liability
+IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+DAMAGES, OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT, OR
+OTHERWISE, ARISING FROM, OUT OF, OR IN CONNECTION WITH THE SOFTWARE OR THE USE
+OR OTHER DEALINGS IN THE SOFTWARE.
+
+9) Termination
+Any use not compliant with this License automatically terminates your rights
+under it.

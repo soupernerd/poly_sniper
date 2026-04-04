@@ -1,0 +1,910 @@
+<!DOCTYPE html>
+<!--
+  ══════════════════════════════════════════════════════════════════════════════
+  FILE: snipe_view/index.html — STANDALONE READ-ONLY VIEWER
+  BACKEND: snipe_view/app.py (FastAPI, port 8900)
+  DB: data/sniper.db (trades, positions — READ-ONLY queries)
+  ══════════════════════════════════════════════════════════════════════════════
+
+  PURPOSE
+    Public-facing read-only dashboard. Shows live bot status, open positions,
+    recent trades, and log output without any ability to control the bot.
+    Zero POST routes, zero settings, zero config writes. Safe to expose
+    externally (protected by a simple PIN gate).
+
+  DATA FLOW
+    - SSE stream:  GET /api/stream pushes a full payload every ~1.5s.
+                   Contains: status (running, paused, started_at, stats),
+                   positions, trades, total_pnl, log (last 1000 lines),
+                   slugs, visitors (active count + IPs), wallet_balance,
+                   wallet_symbol.
+    - Auth:        PIN entered on first visit, stored as a signed cookie.
+                   Backend validates via HMAC. No sessions, no tokens.
+    - No controls: No pause/resume/kill/settings endpoints.
+
+  HTML LAYOUT
+    <header>          — Logo + "VIEW ONLY" label, visitor count badge with
+                        IP tooltip, wallet balance (green), uptime, status
+                        badge (LIVE/PAUSED/STOPPED), Polymarket profile link.
+    .status-panel     — Three stacked panels:
+      #logPanel       — Live log with color-coded lines (same palette as
+                        main dashboard: snipe=blue, warn=amber, redeem=teal).
+      #positionsTable — Open positions (market, outcome, shares, avg price,
+                        cost, edge, result).
+      #tradesTable    — Recent trades (last 50) with PnL display.
+
+  JAVASCRIPT STRUCTURE
+    $(id)             — Shorthand for getElementById.
+    updateDashboard() — Main render function called on every SSE message.
+                        Updates: badge, uptime, balance, visitor badge,
+                        positions table, trades table, log panel.
+    connectSSE()      — Opens EventSource to /api/stream. Called after PIN
+                        authentication succeeds. Auto-reconnects on failure.
+    Clock             — ET + UTC + next-5m countdown, updated every 1s.
+    escHtml()         — Sanitizes log lines for safe innerHTML rendering.
+    marketLink()      — Builds Polymarket links from slug cache.
+    assetBadge()      — Colored asset label (BTC/ETH/SOL/XRP).
+
+  WALLET BALANCE
+    Fetched server-side in snipe_view/app.py via Etherscan v2 API (Polygon
+    USDC.e token balance), cached 30s (_get_cached_balance). Sent in SSE
+    as wallet_balance/wallet_symbol. Rendered in header as green text.
+
+  KEY DIFFERENCES FROM MAIN DASHBOARD (dashboard/index.html)
+    - No control panel (no pause/resume/kill buttons)
+    - No settings inputs (no scanner, execution, or guard controls)
+    - No stat cards bar (tracked markets, opportunities, etc.)
+    - Has visitor tracking (active viewer count + IP display)
+    - Has PIN authentication gate
+    - Runs on separate port (8900 vs 8898)
+    - Meant for external/public access; main dashboard is operator-only
+  ══════════════════════════════════════════════════════════════════════════════
+-->
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PolySnipe — View Only</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --card: #1a1d26;
+      --border: #2a2d36;
+      --text: #e0e0e0;
+      --dim: #888;
+      --accent: #f59e0b;
+      --green: #22c55e;
+      --red: #ef4444;
+      --yellow: #eab308;
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+      background: transparent;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: transparent;
+      border-radius: 3px;
+    }
+
+    *:hover::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.12);
+    }
+
+    * {
+      scrollbar-width: thin;
+      scrollbar-color: transparent transparent;
+    }
+
+    *:hover {
+      scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
+    }
+
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 20px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+
+    header h1 {
+      font-size: 1.3em;
+      font-weight: 600;
+    }
+
+    header h1 span {
+      color: var(--accent);
+    }
+
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .profile-icon {
+      display: flex;
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid var(--border);
+      color: var(--dim);
+      cursor: pointer;
+      transition: all 0.2s;
+      align-items: center;
+      justify-content: center;
+      margin-left: 4px;
+      text-decoration: none;
+    }
+
+    .profile-icon:hover {
+      background: rgba(255, 255, 255, 0.12);
+      color: var(--accent);
+      border-color: var(--accent);
+    }
+
+    .market-link {
+      color: var(--text);
+      text-decoration: none;
+      border-bottom: 1px dotted var(--dim);
+    }
+
+    .market-link:hover {
+      color: var(--accent);
+      border-bottom-color: var(--accent);
+    }
+
+    .status-badge {
+      padding: 4px 12px;
+      border-radius: 20px;
+      font-size: 0.8em;
+      font-weight: 600;
+    }
+
+    .status-running {
+      background: #22c55e22;
+      color: var(--green);
+    }
+
+    .status-stopped {
+      background: #ef444422;
+      color: var(--red);
+    }
+
+    .status-dryrun {
+      background: #eab30822;
+      color: var(--yellow);
+    }
+
+    .status-paused {
+      background: #f59e0b22;
+      color: var(--accent);
+    }
+
+    .sse-dot {
+      display: inline-block;
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      margin-right: 5px;
+      vertical-align: middle;
+    }
+
+    .sse-live {
+      background: var(--green);
+      box-shadow: 0 0 4px var(--green);
+    }
+
+    .sse-off {
+      background: var(--yellow);
+      animation: sse-pulse 1.2s ease-in-out infinite;
+    }
+
+    @keyframes sse-pulse {
+
+      0%,
+      100% {
+        opacity: .3
+      }
+
+      50% {
+        opacity: 1
+      }
+    }
+
+    .uptime {
+      font-size: 0.75em;
+      color: var(--dim);
+    }
+
+    .clock {
+      font-size: 1em;
+      color: var(--accent);
+      font-family: 'Fira Code', 'Consolas', monospace;
+      letter-spacing: 0.5px;
+    }
+
+    .clock-label {
+      color: var(--dim);
+      font-size: 0.85em;
+      text-transform: uppercase;
+      margin-right: 2px;
+    }
+
+    .view-badge {
+      font-size: 0.65em;
+      color: var(--dim);
+      padding: 2px 8px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+    }
+
+    .visitor-count {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 0.78em;
+      color: var(--dim);
+      padding: 3px 10px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: rgba(255, 255, 255, 0.03);
+      position: relative;
+      cursor: default;
+    }
+
+    .visitor-count svg {
+      opacity: 0.6;
+    }
+
+    .visitor-count .num {
+      color: var(--accent);
+      font-weight: 600;
+      font-family: 'Fira Code', 'Consolas', monospace;
+    }
+
+    .visitor-ip-tip {
+      display: none;
+      position: absolute;
+      top: 100%;
+      right: 0;
+      margin-top: 6px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 6px 10px;
+      font-size: 0.82em;
+      white-space: nowrap;
+      z-index: 100;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+      min-width: 130px;
+    }
+
+    .visitor-count:hover .visitor-ip-tip {
+      display: block;
+    }
+
+    .visitor-ip-tip .ip-line {
+      color: var(--text);
+      font-family: 'Fira Code', 'Consolas', monospace;
+      font-size: 0.9em;
+      padding: 1px 0;
+    }
+
+    .visitor-ip-tip .ip-label {
+      color: var(--dim);
+      font-size: 0.8em;
+      margin-bottom: 3px;
+    }
+
+    .status-panel {
+      padding: 16px 20px;
+      max-width: 1100px;
+      margin: 0 auto;
+      width: 100%;
+    }
+
+
+    .panel {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px;
+      margin-bottom: 12px;
+    }
+
+    .panel h2 {
+      font-size: 0.95em;
+      margin-bottom: 10px;
+      color: var(--accent);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.82em;
+    }
+
+    th {
+      text-align: left;
+      color: var(--dim);
+      font-weight: 500;
+      padding: 5px 6px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    td {
+      padding: 5px 6px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    tr:last-child td {
+      border-bottom: none;
+    }
+
+    .mono {
+      font-family: 'Cascadia Code', 'Consolas', monospace;
+      font-size: 0.9em;
+    }
+
+    .green {
+      color: var(--green);
+    }
+
+    .red {
+      color: var(--red);
+    }
+
+    .empty {
+      color: var(--dim);
+      text-align: center;
+      padding: 14px;
+      font-style: italic;
+    }
+
+    .asset-badge {
+      display: inline-block;
+      font-size: 0.72em;
+      padding: 1px 5px;
+      border-radius: 3px;
+      background: rgba(255, 255, 255, 0.06);
+      color: var(--dim);
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+      vertical-align: middle;
+    }
+
+    .asset-bitcoin {
+      color: #f7931a;
+      background: #f7931a22;
+    }
+
+    .asset-ethereum {
+      color: #627eea;
+      background: #627eea22;
+    }
+
+    .asset-solana {
+      color: #9945ff;
+      background: #9945ff22;
+    }
+
+    .asset-xrp {
+      color: #23292f;
+      background: #23292f44;
+    }
+
+    /* Log panel -- matches main dashboard exactly */
+    .log-panel {
+      background: #0a0c10;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px;
+      max-height: 280px;
+      overflow-y: auto;
+      font-family: 'Cascadia Code', 'Consolas', monospace;
+      font-size: 0.72em;
+      line-height: 1.5;
+      color: var(--dim);
+    }
+
+    .log-panel .log-line {
+      white-space: pre;
+    }
+
+    .log-panel .log-line.error {
+      color: var(--red);
+    }
+
+    .log-panel .log-line.warning {
+      color: var(--yellow);
+    }
+
+    .log-panel .log-line .ts-hot {
+      color: #4ade80;
+      font-weight: 600;
+    }
+
+    .log-panel .log-line.verbose {
+      color: #6b7280;
+    }
+
+    /* Flow-based chalk colors (colorblind-safe, grouped by process) */
+    .log-panel .log-line.chalk-snipe {
+      color: #7cb7ff;
+    }
+
+    /* steel-blue — entire snipe sequence */
+    .log-panel .log-line.chalk-redeem {
+      color: #5fd4b0;
+    }
+
+    /* teal — redemption flow */
+    .log-panel .log-line.chalk-warn {
+      color: #f0c75e;
+    }
+
+    .log-panel .log-line.chalk-mode2 {
+      color: #4ade80;
+    }
+
+    /* warm amber — losses/safety */
+  </style>
+</head>
+
+<body>
+
+  <!-- PIN Gate -->
+  <div id="pinOverlay" style="
+  position:fixed; inset:0; z-index:9999;
+  background:var(--bg); display:flex; align-items:center; justify-content:center;
+  flex-direction:column; gap:18px;
+">
+    <div style="font-size:1.4em; font-weight:600;">⚡ Poly<span style="color:var(--accent)">Snipe</span></div>
+    <div style="color:var(--dim); font-size:0.85em; margin-bottom:4px;">Enter PIN to continue</div>
+    <div style="display:flex; gap:10px;" id="pinBoxes">
+      <input class="pin-digit" type="tel" maxlength="1" inputmode="numeric" autocomplete="off" autofocus>
+      <input class="pin-digit" type="tel" maxlength="1" inputmode="numeric" autocomplete="off">
+      <input class="pin-digit" type="tel" maxlength="1" inputmode="numeric" autocomplete="off">
+      <input class="pin-digit" type="tel" maxlength="1" inputmode="numeric" autocomplete="off">
+    </div>
+    <div id="pinError" style="color:var(--red); font-size:0.8em; min-height:1.2em;"></div>
+  </div>
+  <style>
+    .pin-digit {
+      width: 48px;
+      height: 56px;
+      text-align: center;
+      font-size: 1.6em;
+      font-weight: 700;
+      font-family: 'Fira Code', 'Consolas', monospace;
+      background: var(--card);
+      border: 2px solid var(--border);
+      border-radius: 10px;
+      color: var(--text);
+      outline: none;
+      caret-color: var(--accent);
+      transition: border-color 0.2s;
+    }
+
+    .pin-digit:focus {
+      border-color: var(--accent);
+    }
+
+    .pin-digit.shake {
+      animation: shake 0.4s ease;
+    }
+
+    @keyframes shake {
+
+      0%,
+      100% {
+        transform: translateX(0)
+      }
+
+      20%,
+      60% {
+        transform: translateX(-6px)
+      }
+
+      40%,
+      80% {
+        transform: translateX(6px)
+      }
+    }
+  </style>
+  <script>
+    (function () {
+      // Skip PIN if already authed (cookie exists and SSE works)
+      const digits = document.querySelectorAll('.pin-digit');
+      const overlay = document.getElementById('pinOverlay');
+      const errEl = document.getElementById('pinError');
+
+      // Auto-focus & navigation
+      digits.forEach((inp, i) => {
+        inp.addEventListener('input', () => {
+          inp.value = inp.value.replace(/\D/g, '').slice(-1);
+          if (inp.value && i < 3) digits[i + 1].focus();
+          if (i === 3 && inp.value) submitPin();
+        });
+        inp.addEventListener('keydown', (e) => {
+          if (e.key === 'Backspace' && !inp.value && i > 0) {
+            digits[i - 1].focus(); digits[i - 1].value = '';
+          }
+          if (e.key === 'Enter') submitPin();
+        });
+        // handle paste
+        inp.addEventListener('paste', (e) => {
+          e.preventDefault();
+          const pasted = (e.clipboardData.getData('text') || '').replace(/\D/g, '').slice(0, 4);
+          pasted.split('').forEach((ch, j) => { if (digits[j]) digits[j].value = ch; });
+          if (pasted.length === 4) submitPin();
+          else if (pasted.length > 0) digits[Math.min(pasted.length, 3)].focus();
+        });
+      });
+
+      async function submitPin() {
+        const pin = Array.from(digits).map(d => d.value).join('');
+        if (pin.length < 4) return;
+        errEl.textContent = '';
+        try {
+          const res = await fetch('/api/auth', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pin }),
+          });
+          if (res.ok) {
+            overlay.style.display = 'none';
+            connectSSE();
+          } else {
+            errEl.textContent = 'Wrong PIN';
+            digits.forEach(d => { d.value = ''; d.classList.add('shake'); });
+            digits[0].focus();
+            setTimeout(() => digits.forEach(d => d.classList.remove('shake')), 500);
+          }
+        } catch (e) {
+          errEl.textContent = 'Connection error';
+        }
+      }
+
+      // If already authed (cookie still valid), hide overlay immediately
+      // Use lightweight /api/auth/check -- NOT /api/stream which would open
+      // a ghost SSE connection and inflate the viewer count.
+      fetch('/api/auth/check').then(r => {
+        if (r.ok) { overlay.style.display = 'none'; connectSSE(); }
+      }).catch(() => { });
+    })();
+  </script>
+
+  <header>
+    <h1>⚡ Poly<span>Snipe</span> <span class="view-badge">view only</span></h1>
+    <div class="header-right">
+      <span class="visitor-count" id="visitorBadge" title="">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+          stroke-linecap="round" stroke-linejoin="round">
+          <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+          <circle cx="9" cy="7" r="4" />
+          <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+          <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+        </svg>
+        <span class="num" id="visitorCount">—</span>
+        <div class="visitor-ip-tip" id="visitorIpTip"></div>
+      </span>
+      <span style="color: var(--green); font-weight: 600; font-size: 0.9em; margin-right: 10px;">Balance: <span
+          id="walletBalance">—</span></span>
+      <span class="uptime" id="uptime"></span>
+      <span class="status-badge status-stopped" id="statusBadge">STOPPED</span>
+      <a id="profileIcon" class="profile-icon" href="https://polymarket.com/@ChiefMeef?tab=activity" target="_blank"
+        rel="noopener" title="My Polymarket Profile">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+          stroke-linecap="round" stroke-linejoin="round">
+          <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+          <circle cx="12" cy="7" r="4" />
+        </svg>
+      </a>
+    </div>
+  </header>
+
+  <div class="status-panel">
+    <!-- Live Log -->
+    <div class="panel">
+      <h2 style="display:flex;justify-content:space-between;align-items:center;">Live Log <span class="clock"
+          id="clockDisplay" style="font-weight:400;"></span></h2>
+      <div class="log-panel" id="logPanel"></div>
+    </div>
+
+    <!-- Open Positions -->
+    <div class="panel">
+      <h2>Open Positions</h2>
+      <div id="positionsTable">
+        <div class="empty">No open positions</div>
+      </div>
+    </div>
+
+    <!-- Recent Trades -->
+    <div class="panel">
+      <h2>Recent Trades</h2>
+      <div id="dryScorecard"
+        style="display:none;padding:8px 12px;margin-bottom:8px;background:rgba(255,193,7,0.08);border:1px solid rgba(255,193,7,0.25);border-radius:6px;font-size:0.85em;">
+      </div>
+      <div id="tradesTable" style="max-height:520px;overflow-y:auto;">
+        <div class="empty">No trades yet</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const $ = id => document.getElementById(id);
+    let _startedAt = null;
+    let _slugMap = {};
+    let _sseConnected = false;
+    let _lastBadgeText = '';
+    let _lastBadgeClass = '';
+
+    function _updateBadgeSSE() {
+      const badge = $('statusBadge');
+      const dot = _sseConnected ? '<span class="sse-dot sse-live"></span>' : '<span class="sse-dot sse-off"></span>';
+      badge.innerHTML = dot + _lastBadgeText;
+      badge.className = _lastBadgeClass;
+    }
+
+    function marketLink(title, maxLen, conditionId) {
+      const text = title ? title.slice(0, maxLen || 40) : '-';
+      const slug = _slugMap[conditionId];
+      if (slug) {
+        return `<a href="https://polymarket.com/event/${slug}" target="_blank" class="market-link" title="${(title || '').replace(/"/g, '&quot;')}">${text}</a>`;
+      }
+      return `<span>${text}</span>`;
+    }
+
+    function assetBadge(asset) {
+      const cls = 'asset-badge asset-' + (asset || '').toLowerCase();
+      return `<span class="${cls}">${(asset || '?').toUpperCase()}</span>`;
+    }
+
+    function escHtml(s) {
+      return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    function formatUptime() {
+      if (!_startedAt) return '';
+      const s = Math.floor((Date.now() - new Date(_startedAt).getTime()) / 1000);
+      const h = Math.floor(s / 3600);
+      const m = Math.floor((s % 3600) / 60);
+      return h > 0 ? `${h}h ${m}m` : `${m}m`;
+    }
+
+    function updateClock() {
+      const now = new Date();
+      const utc = now.toLocaleTimeString('en-US', { timeZone: 'UTC', hour12: true, hour: 'numeric', minute: '2-digit', second: '2-digit' });
+      const et = now.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour12: true, hour: 'numeric', minute: '2-digit', second: '2-digit' });
+      const utcNow = new Date(now.toLocaleString('en-US', { timeZone: 'UTC' }));
+      const secsToNext = (300 - ((utcNow.getMinutes() % 5) * 60 + utcNow.getSeconds())) % 300;
+      const nMin = Math.floor(secsToNext / 60);
+      const nSec = secsToNext % 60;
+      const nextStr = `${nMin}:${String(nSec).padStart(2, '0')}`;
+      $('clockDisplay').innerHTML = `<span class="clock-label">ET</span>${et} <span class="clock-label" style="margin-left:6px">UTC</span>${utc} <span class="clock-label" style="margin-left:6px">next 5m</span>${nextStr}`;
+    }
+    setInterval(updateClock, 1000);
+    updateClock();
+
+    function updateDashboard(data) {
+      const st = data.status;
+      if (!st) return;
+
+      _startedAt = st.started_at;
+      $('uptime').textContent = formatUptime();
+      if (data.wallet_balance != null) {
+        const sym = data.wallet_symbol || 'USDC.e';
+        $('walletBalance').textContent = sym + ' ' + Number(data.wallet_balance || 0).toFixed(2);
+      }
+
+      // Profile icon
+      const pi = $('profileIcon');
+      if (pi) pi.style.display = 'inline-flex';
+
+      // Active viewers
+      if (data.visitors) {
+        $('visitorCount').textContent = data.visitors.active;
+        const ips = data.visitors.ips || [];
+        const tip = $('visitorIpTip');
+        if (ips.length) {
+          tip.innerHTML = '<div class="ip-label">Connected IPs</div>' + ips.map(ip => '<div class="ip-line">' + escHtml(ip) + '</div>').join('');
+        } else {
+          tip.innerHTML = '<div class="ip-label">No viewers</div>';
+        }
+      }
+
+      // Badge
+      if (!st.running) {
+        _lastBadgeText = 'STOPPED';
+        _lastBadgeClass = 'status-badge status-stopped';
+      } else if (st.paused) {
+        _lastBadgeText = 'PAUSED';
+        _lastBadgeClass = 'status-badge status-paused';
+      } else {
+        _lastBadgeText = 'LIVE';
+        _lastBadgeClass = 'status-badge status-running';
+      }
+      _updateBadgeSSE();
+
+      // Slugs
+      Object.assign(_slugMap, data.slugs || {});
+
+
+
+      // Positions
+      const positions = data.positions || [];
+      if (positions.length > 0) {
+        let html = '<table><tr><th>Market</th><th>Outcome</th><th>Shares</th><th>Avg Price</th><th>Cost</th><th>Edge</th><th>Result</th></tr>';
+        for (const p of positions) {
+          const edge = (1 - p.avg_price).toFixed(4);
+          let resHtml;
+          if (p.result === 'won') {
+            const pnl = p.shares - p.total_cost;
+            const pnlStr = '+$' + Math.abs(pnl).toFixed(2);
+            resHtml = `<span style="color:var(--green);font-weight:600">✓ WON</span> <span class="mono" style="color:var(--green);font-size:0.85em">${pnlStr}</span>`;
+          } else if (p.result === 'lost') {
+            const pnl = p.total_cost;
+            const pnlStr = '-$' + Math.abs(pnl).toFixed(2);
+            resHtml = `<span style="color:var(--red);font-weight:600">✗ LOST</span> <span class="mono" style="color:var(--red);font-size:0.85em">${pnlStr}</span>`;
+          } else {
+            resHtml = '<span style="color:var(--dim)">pending</span>';
+          }
+          html += `<tr>
+        <td>${assetBadge(p.asset)} ${marketLink(p.event_title, 65, p.condition_id)}</td>
+        <td class="green">${p.outcome}</td>
+        <td class="mono">${(p.shares || 0).toFixed(2)}</td>
+        <td class="mono">$${(p.avg_price || 0).toFixed(4)}</td>
+        <td class="mono">$${(p.total_cost || 0).toFixed(2)}</td>
+        <td class="mono green">$${edge}</td>
+        <td>${resHtml}</td>
+      </tr>`;
+        }
+        html += '</table>';
+        $('positionsTable').innerHTML = html;
+      } else {
+        $('positionsTable').innerHTML = '<div class="empty">No open positions</div>';
+      }
+
+      // Trades
+      const allTrades = data.trades || [];
+      if (allTrades.length > 0) {
+        let html = '<table><tr><th>Time</th><th>Market</th><th>Outcome</th><th>Shares</th><th>Price</th><th>Amount</th><th>Edge</th><th>Result</th></tr>';
+        for (const t of allTrades.slice(0, 50)) {
+          const raw = t.timestamp || '';
+          const d = new Date(raw.endsWith('Z') ? raw : raw + 'Z');
+          const time = isNaN(d) ? raw.substring(11, 19) : d.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true });
+          const res = t.result || 'pending';
+          let resHtml;
+          if (res === 'won') resHtml = '<span style="color:var(--green);font-weight:600">✓ WON</span>';
+          else if (res === 'lost') resHtml = '<span style="color:var(--red);font-weight:600">✗ LOST</span>';
+          else resHtml = '<span style="color:var(--dim)">pending</span>';
+          const pnlVal = t.pnl != null ? t.pnl : null;
+          const pnlStr = pnlVal != null ? (pnlVal >= 0 ? '+$' : '-$') + Math.abs(pnlVal).toFixed(2) : '';
+          const pnlColor = pnlVal != null ? (pnlVal >= 0 ? 'var(--green)' : 'var(--red)') : 'var(--dim)';
+          html += `<tr>
+        <td class="mono">${time}</td>
+        <td>${assetBadge(t.asset)} ${marketLink(t.event_title, 65, t.condition_id)}</td>
+        <td class="green">${t.outcome}</td>
+        <td class="mono">${(t.shares || 0).toFixed(2)}</td>
+        <td class="mono">$${(t.price || 0).toFixed(4)}</td>
+        <td class="mono">$${(t.amount || 0).toFixed(2)}</td>
+        <td class="mono green">$${(t.edge || 0).toFixed(4)}</td>
+        <td>${resHtml}${pnlStr ? ' <span class="mono" style="color:' + pnlColor + ';font-size:0.85em">' + pnlStr + '</span>' : ''}</td>
+      </tr>`;
+        }
+        html += '</table>';
+        $('tradesTable').innerHTML = html;
+      } else {
+        $('tradesTable').innerHTML = '<div class="empty">No trades yet</div>';
+      }
+
+      // Log -- matches main dashboard rendering
+      const logLines = data.log || [];
+      if (logLines.length > 0) {
+        const el = $('logPanel');
+        const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 30;
+        el.innerHTML = logLines.map(line => {
+          let cls = 'log-line';
+          if (line.includes('ERROR')) cls += ' error';
+          else if (line.includes('WARNING')) cls += ' warning';
+          // Losses & safety (amber)
+          else if (line.includes('[LOSS]') || line.includes('[FEED: ECON-PAUSE]') || line.includes('[FEED: ECON-HWM]') || line.includes('FAIL-SAFE')) cls += ' chalk-warn';
+          // HFT action colors: success=green, fail=amber, stage=steel blue
+          else if (line.includes('[HFT-DONE]')
+            || line.includes('[HFT-FILL]')) cls += ' chalk-mode2';
+          else if (line.includes('[HFT-FAIL]')) cls += ' chalk-warn';
+          else if (line.includes('[HFT-BARRIER]')
+            || line.includes('[HFT-ARM]')
+            || line.includes('[HFT-SPRING]')
+            || line.includes('[HFT-FIRE]')
+            || line.includes('[HFT-ACK]')
+            || line.includes('[HFT-PENDING]')
+            || line.includes('[HFT-DISARM]')
+            || line.includes('[HFT-MUZZLE]')
+            || line.includes('[HFT-START-DELAY]')
+            || line.includes('[HFT-LATENCY]')
+            || line.includes('[HFT-EVAL]')
+            || line.includes('[HFT-GATE]')
+            || line.includes('[HFT-RECOVERY]')) cls += ' chalk-snipe';
+          // Snipe sequence (steel blue) — detection through result, one color
+          else if (line.includes('snipe opportunities')
+            || line.includes('SNIPING')
+            || line.includes('[SNIPE: BUY]')
+            || line.includes('[BOUGHT]')
+            || line.includes('[FILL CONFIRMED]')
+            || line.includes('[LAST-SECOND FILL]')
+            || line.includes('Snipe result:')
+            || line.includes('[PRE-END]')
+            || line.includes('[WS-INSTANT]')
+            || line.includes('[POLL]')) cls += ' chalk-snipe';
+          // Snipe failures & skips (amber/orange)
+          else if (line.includes('[NO FILL]')
+            || line.includes('[INSTANT-FILL FAILED]')
+            || line.includes('[THIN BOOK]')
+            || line.includes('[TOO SMALL]')
+            || line.includes('[SWING GUARD]')
+            || line.includes('[SNIPE CRASHED]')) cls += ' chalk-warn';
+          // Post-market & redemption flow (teal) — orders, settlement, fills, redeems
+          else if (line.includes('[POST: ORDER]') || line.includes('[POST: SETTLE]')
+            || line.includes('[POST: MONITOR]') || line.includes('[POST: FILL]')
+            || line.includes('INSTANT MATCH')
+            || line.includes('[FEED: REDEEMED]') || line.includes('[OK] REDEEMED')
+            || line.includes('[OK] EXTERNAL') || line.includes('Instant redemption:')
+            || line.includes('Instant snipe result')) cls += ' chalk-redeem';
+          else if (line.includes('[V]')) cls += ' verbose';
+          // Highlight timestamp green for snipe-window lines
+          const snipeMatch = line.match(/(\d+)s before end/);
+          const escaped = escHtml(line);
+          if (snipeMatch) {
+            const sepIdx = escaped.indexOf(' | ');
+            const splitAt = sepIdx !== -1 ? sepIdx : 19;
+            const ts = escaped.substring(0, splitAt);
+            const rest = escaped.substring(splitAt);
+            return `<div class="${cls}"><span class="ts-hot">${ts}</span>${rest}</div>`;
+          }
+          return `<div class="${cls}">${escaped}</div>`;
+        }).join('');
+        if (atBottom) el.scrollTop = el.scrollHeight;
+      }
+    }
+
+    // ── SSE (read-only stream) ──
+    function connectSSE() {
+      const es = new EventSource('/api/stream');
+      es.onopen = () => { _sseConnected = true; _updateBadgeSSE(); };
+      es.onmessage = (e) => {
+        try { updateDashboard(JSON.parse(e.data)); } catch (err) { console.error('SSE parse error', err); }
+      };
+      es.onerror = () => {
+        _sseConnected = false; _updateBadgeSSE();
+        if (es.readyState === EventSource.CLOSED) setTimeout(connectSSE, 3000);
+      };
+    }
+    // connectSSE() is called by the PIN gate after authentication
+  </script>
+</body>
+
+</html>
