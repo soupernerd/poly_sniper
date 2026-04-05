@@ -103,7 +103,7 @@ execution:
   min_edge_1h: 0.0
   min_edge_4h: 0.0
   min_edge_1d: 0.0
-  economic_pause_drawdown: 20.0
+  economic_pause_drawdown: 34.0
   gtc_fallback_enabled: false
   trading_mode: live
 post_end:
@@ -154,28 +154,28 @@ blackout:
   slots_1d_am: ''
   slots_1d_pm: ''
 trend:
-  hft_bet_amount: 1.0
-  hft_flip_profit_pct: 0.0
+  hft_bet_amount: 4.0
+  hft_flip_profit_pct: 300.0
   hft_muzzle_seconds: 0
-  hft_max_price: 0.85
-  hft_max_price_5m: 0.85
-  hft_max_price_15m: 0.85
+  hft_max_price: 0.65
+  hft_max_price_5m: 0.65
+  hft_max_price_15m: 0.8
   hft_max_price_1h: 0.8
   hft_barrier_enabled: true
-  hft_barrier_pct: 0.22
-  hft_barrier_pct_15m: 0.25
+  hft_barrier_pct: 0.005
+  hft_barrier_pct_15m: 0.005
   hft_barrier_pct_1h: 0.2
   hft_barrier_delay: 0
   hft_armed_sniper_enabled: true
   hft_mode2_entry_mode: ''
   hft_mode2_trigger_cooldown_ms: 150
-  hft_optimizer_objective_mode: win_rate
-  hft_optimizer_lookback_hours: 5000
-  hft_optimizer_min_trades: 500
+  hft_optimizer_objective_mode: pnl
+  hft_optimizer_lookback_hours: 24
+  hft_optimizer_min_trades: 0
   hft_barrier_matrix:
     bitcoin:
-      5m: 0.1
-      15m: 0.25
+      5m: 0.005
+      15m: 0.005
       1h: 0.2
     ethereum:
       5m: 0.35
@@ -191,8 +191,8 @@ trend:
       1h: 0.3
   hft_max_price_matrix:
     bitcoin:
-      5m: 0.96
-      15m: 0.96
+      5m: 0.75
+      15m: 0.75
       1h: 0.8
     ethereum:
       5m: 0.98

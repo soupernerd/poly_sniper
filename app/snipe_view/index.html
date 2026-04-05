@@ -615,8 +615,8 @@
           id="walletBalance">—</span></span>
       <span class="uptime" id="uptime"></span>
       <span class="status-badge status-stopped" id="statusBadge">STOPPED</span>
-      <a id="profileIcon" class="profile-icon" href="https://polymarket.com/@ChiefMeef?tab=activity" target="_blank"
-        rel="noopener" title="My Polymarket Profile">
+      <a id="profileIcon" class="profile-icon" href="https://polymarket.com/" target="_blank"
+        rel="noopener" title="Open Polymarket">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
           stroke-linecap="round" stroke-linejoin="round">
           <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
@@ -678,6 +678,14 @@
       return `<span>${text}</span>`;
     }
 
+    function _polymarketProfileHref(walletAddress) {
+      const addr = String(walletAddress || '').trim();
+      if (/^0x[a-fA-F0-9]{40}$/.test(addr)) {
+        return `https://polymarket.com/profile/${addr}`;
+      }
+      return 'https://polymarket.com/';
+    }
+
     function assetBadge(asset) {
       const cls = 'asset-badge asset-' + (asset || '').toLowerCase();
       return `<span class="${cls}">${(asset || '?').toUpperCase()}</span>`;
@@ -722,7 +730,17 @@
 
       // Profile icon
       const pi = $('profileIcon');
-      if (pi) pi.style.display = 'inline-flex';
+      const walletAddress = String(
+        data.wallet_address ||
+        (data.status && data.status.wallet_address) ||
+        ''
+      ).trim();
+      if (pi) {
+        const hasWalletAddress = /^0x[a-fA-F0-9]{40}$/.test(walletAddress);
+        pi.href = _polymarketProfileHref(walletAddress);
+        pi.title = hasWalletAddress ? 'My Polymarket Profile' : 'Open Polymarket';
+        pi.style.display = 'inline-flex';
+      }
 
       // Active viewers
       if (data.visitors) {
