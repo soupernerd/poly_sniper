@@ -189,6 +189,33 @@
   }
   .slot-split .amv { color: #7dd3fc; font-weight: 600; }
   .slot-split .pmv { color: #fca5a5; font-weight: 600; }
+  .hour-scope-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+    font-size: 0.78em;
+    color: var(--dim);
+  }
+  .hour-scope-row label {
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 600;
+    font-size: 0.85em;
+  }
+  .hour-scope-row select {
+    background: var(--ctrl-bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 6px;
+    padding: 6px 8px;
+    font-size: 0.9em;
+  }
+  .hour-scope-hint {
+    font-size: 0.95em;
+    color: var(--dim);
+  }
 
   @media (max-width: 600px) {
     .content { padding: 12px; }
@@ -215,6 +242,25 @@
   <!-- 5-Minute Clock -->
   <div class="clock-section" id="section5m">
     <h2><span class="tf-badge">5m</span> 5-Minute Markets</h2>
+    <div class="hour-scope-row">
+      <label for="scopeHour5m">Hour scope</label>
+      <select id="scopeHour5m" onchange="set5mHourScope(this.value)">
+        <option value="all">All hours (legacy)</option>
+        <option value="1">1 o'clock (AM/PM)</option>
+        <option value="2">2 o'clock (AM/PM)</option>
+        <option value="3">3 o'clock (AM/PM)</option>
+        <option value="4">4 o'clock (AM/PM)</option>
+        <option value="5">5 o'clock (AM/PM)</option>
+        <option value="6">6 o'clock (AM/PM)</option>
+        <option value="7">7 o'clock (AM/PM)</option>
+        <option value="8">8 o'clock (AM/PM)</option>
+        <option value="9">9 o'clock (AM/PM)</option>
+        <option value="10">10 o'clock (AM/PM)</option>
+        <option value="11">11 o'clock (AM/PM)</option>
+        <option value="12">12 o'clock (AM/PM)</option>
+      </select>
+      <span class="hour-scope-hint" id="scopeHourHint5m"></span>
+    </div>
     <div style="font-size:0.74em;color:var(--dim);margin-bottom:8px;">
       Each wedge is split: inner half is <span class="amv">AM</span>, outer half is <span class="pmv">PM</span>. Click either half to toggle.
     </div>
@@ -269,13 +315,15 @@
 
 <script>
 let blackout = {
-  "5m": { all: [], am: [], pm: [] },
+  "5m": { all: [], am: [], pm: [], hourly: {} },
   "15m": { all: [], am: [], pm: [] },
   "1h": { all: [], am: [], pm: [] },
   "4h": { all: [], am: [], pm: [] },
   "1d": { all: [], am: [], pm: [] },
 };
 let stats = {};
+let selected5mHour = "all";
+const HOURS_12 = [1,2,3,4,5,6,7,8,9,10,11,12];
 
 const SLOTS_5M = [0,5,10,15,20,25,30,35,40,45,50,55];
 const SLOTS_15M = [0,15,30,45];
@@ -315,28 +363,93 @@ function toast(msg) {
   setTimeout(() => el.classList.remove("show"), 1800);
 }
 
+function _sortedUniqueNums(values, step, maxSlot) {
+  if (!Array.isArray(values)) return [];
+  const set = new Set();
+  for (const raw of values) {
+    const n = Number(raw);
+    if (!Number.isFinite(n)) continue;
+    const slot = Math.trunc(n);
+    if (slot < 0 || slot > maxSlot) continue;
+    if (slot % step !== 0) continue;
+    set.add(slot);
+  }
+  return [...set].sort((a, b) => a - b);
+}
+
+function _selected5mHourNumber() {
+  if (selected5mHour === "all") return null;
+  const h = Number(selected5mHour);
+  if (!Number.isInteger(h) || h < 1 || h > 12) return null;
+  return h;
+}
+
+function _update5mHourScopeHint() {
+  const hint = document.getElementById("scopeHourHint5m");
+  if (!hint) return;
+  const h = _selected5mHourNumber();
+  if (h == null) {
+    hint.textContent = "Editing global AM/PM blocks across all hours.";
+  } else {
+    hint.textContent = `Editing only ${h}:xx AM and ${h}:xx PM (global blocks still apply).`;
+  }
+}
+
+function set5mHourScope(value) {
+  if (value === "all") {
+    selected5mHour = "all";
+  } else {
+    const h = Number(value);
+    selected5mHour = Number.isInteger(h) && h >= 1 && h <= 12 ? String(h) : "all";
+  }
+  const sel = document.getElementById("scopeHour5m");
+  if (sel) sel.value = selected5mHour;
+  _update5mHourScopeHint();
+  render();
+}
+
 function normalizeBlackout() {
   const tfs = ["5m", "15m", "1h", "4h", "1d"];
   for (const tf of tfs) {
     const raw = blackout[tf];
     if (Array.isArray(raw)) {
-      blackout[tf] = { all: raw.slice(), am: [], pm: [] };
+      blackout[tf] = { all: raw.slice(), am: [], pm: [], hourly: {} };
       continue;
     }
     if (!raw || typeof raw !== "object") {
-      blackout[tf] = { all: [], am: [], pm: [] };
+      blackout[tf] = { all: [], am: [], pm: [], hourly: {} };
       continue;
     }
-    blackout[tf] = {
-      all: Array.isArray(raw.all) ? raw.all.slice() : [],
-      am: Array.isArray(raw.am) ? raw.am.slice() : [],
-      pm: Array.isArray(raw.pm) ? raw.pm.slice() : [],
+    const step = tf === "5m" ? 5 : tf === "15m" ? 15 : 60;
+    const maxSlot = tf === "5m" ? 55 : tf === "15m" ? 45 : 0;
+    const normalized = {
+      all: _sortedUniqueNums(raw.all, step, maxSlot),
+      am: _sortedUniqueNums(raw.am, step, maxSlot),
+      pm: _sortedUniqueNums(raw.pm, step, maxSlot),
+      hourly: {},
     };
+    if (tf === "5m" && raw.hourly && typeof raw.hourly === "object") {
+      for (const hour of HOURS_12) {
+        const row = raw.hourly[String(hour)] || raw.hourly[hour];
+        if (!row || typeof row !== "object") continue;
+        const am = _sortedUniqueNums(row.am, 5, 55);
+        const pm = _sortedUniqueNums(row.pm, 5, 55);
+        if (am.length || pm.length) {
+          normalized.hourly[String(hour)] = { am, pm };
+        }
+      }
+    }
+    blackout[tf] = normalized;
   }
 }
 
-function getStats(tf, slot, session) {
-  const base = (stats[tf] || {})[slot] || {};
+function getStats(tf, slot, session, hour12 = null) {
+  let base = {};
+  if (tf === "5m" && Number.isInteger(hour12) && hour12 >= 1 && hour12 <= 12) {
+    base = (((stats["5m_hourly"] || {})[String(hour12)] || {})[slot]) || {};
+  } else {
+    base = (stats[tf] || {})[slot] || {};
+  }
   const s = base[session] || { wins: 0, losses: 0, net: 0 };
   return {
     wins: Number(s.wins || 0),
@@ -345,17 +458,24 @@ function getStats(tf, slot, session) {
   };
 }
 
-function isSessionBlocked(tf, slot, session) {
+function isSessionBlocked(tf, slot, session, hour12 = null) {
   const b = blackout[tf] || {};
   if ((b.all || []).includes(slot)) return true;
-  return (b[session] || []).includes(slot);
+  if ((b[session] || []).includes(slot)) return true;
+  if (tf !== "5m") return false;
+  const h = Number.isInteger(hour12) ? hour12 : _selected5mHourNumber();
+  if (!Number.isInteger(h)) return false;
+  const row = ((b.hourly || {})[String(h)] || {});
+  return Array.isArray(row[session]) && row[session].includes(slot);
 }
 
 function toggleSession(tf, slot, session) {
-  const b = blackout[tf] || { all: [], am: [], pm: [] };
+  const b = blackout[tf] || { all: [], am: [], pm: [], hourly: {} };
+  if (session !== "am" && session !== "pm") return;
   b.all = Array.isArray(b.all) ? b.all : [];
   b.am = Array.isArray(b.am) ? b.am : [];
   b.pm = Array.isArray(b.pm) ? b.pm : [];
+  b.hourly = b.hourly && typeof b.hourly === "object" ? b.hourly : {};
 
   const has = (arr) => arr.includes(slot);
   const add = (arr) => { if (!arr.includes(slot)) arr.push(slot); };
@@ -364,20 +484,38 @@ function toggleSession(tf, slot, session) {
     if (i >= 0) arr.splice(i, 1);
   };
 
-  // Expand legacy/global "all" slot into explicit am+pm before editing one side.
-  if (has(b.all)) {
-    del(b.all);
-    add(b.am);
-    add(b.pm);
+  if (tf === "5m" && _selected5mHourNumber() != null) {
+    if (has(b.all) || has(b[session])) {
+      toast("This side is globally blocked in All hours scope.");
+      return;
+    }
+    const hourKey = String(_selected5mHourNumber());
+    const rowRaw = b.hourly[hourKey];
+    const row = rowRaw && typeof rowRaw === "object" ? rowRaw : { am: [], pm: [] };
+    row.am = Array.isArray(row.am) ? row.am : [];
+    row.pm = Array.isArray(row.pm) ? row.pm : [];
+    if (has(row[session])) del(row[session]);
+    else add(row[session]);
+    row.am.sort((a, b) => a - b);
+    row.pm.sort((a, b) => a - b);
+    if (row.am.length || row.pm.length) {
+      b.hourly[hourKey] = row;
+    } else {
+      delete b.hourly[hourKey];
+    }
+  } else {
+    // Expand legacy/global "all" slot into explicit am+pm before editing one side.
+    if (has(b.all)) {
+      del(b.all);
+      add(b.am);
+      add(b.pm);
+    }
+    if (has(b[session])) del(b[session]);
+    else add(b[session]);
+    b.all.sort((a, b) => a - b);
+    b.am.sort((a, b) => a - b);
+    b.pm.sort((a, b) => a - b);
   }
-
-  if (session !== "am" && session !== "pm") return;
-  if (has(b[session])) del(b[session]);
-  else add(b[session]);
-
-  b.all.sort((a, b) => a - b);
-  b.am.sort((a, b) => a - b);
-  b.pm.sort((a, b) => a - b);
   blackout[tf] = b;
   saveBlackout();
   render();
@@ -405,13 +543,14 @@ function render5mClock() {
   const n = 12;
   const angleStep = (2 * Math.PI) / n;
   const offset = -Math.PI / 2;
+  const selectedHour = _selected5mHourNumber();
 
   for (let i = 0; i < n; i++) {
     const slot = SLOTS_5M[i];
-    const sAm = getStats("5m", slot, "am");
-    const sPm = getStats("5m", slot, "pm");
-    const amBlocked = isSessionBlocked("5m", slot, "am");
-    const pmBlocked = isSessionBlocked("5m", slot, "pm");
+    const sAm = getStats("5m", slot, "am", selectedHour);
+    const sPm = getStats("5m", slot, "pm", selectedHour);
+    const amBlocked = isSessionBlocked("5m", slot, "am", selectedHour);
+    const pmBlocked = isSessionBlocked("5m", slot, "pm", selectedHour);
     const amHasData = (sAm.wins + sAm.losses) > 0;
     const pmHasData = (sPm.wins + sPm.losses) > 0;
 
@@ -479,14 +618,14 @@ function render5mClock() {
   ct.classList.add("center-text");
   ct.setAttribute("x", cx);
   ct.setAttribute("y", cy - 6);
-  ct.textContent = "5-MIN";
+  ct.textContent = selectedHour == null ? "5-MIN" : `${selectedHour}:XX`;
   svg.appendChild(ct);
 
   const ct2 = document.createElementNS("http://www.w3.org/2000/svg", "text");
   ct2.classList.add("center-text");
   ct2.setAttribute("x", cx);
   ct2.setAttribute("y", cy + 10);
-  ct2.textContent = "SLOTS";
+  ct2.textContent = selectedHour == null ? "ALL HOURS" : "AM / PM";
   svg.appendChild(ct2);
 
   const nowEt = new Date(new Date().toLocaleString("en-US", { timeZone: "America/New_York" }));
@@ -572,16 +711,17 @@ function renderSummary() {
   let netImpact = 0;
 
   for (const [tf, slots] of Object.entries(SLOT_MAP)) {
+    const hourFor5m = tf === "5m" ? _selected5mHourNumber() : null;
     for (const slot of slots) {
-      if (isSessionBlocked(tf, slot, "am")) {
-        const s = getStats(tf, slot, "am");
+      if (isSessionBlocked(tf, slot, "am", hourFor5m)) {
+        const s = getStats(tf, slot, "am", hourFor5m);
         totalBlocked += 1;
         savedLosses += s.losses;
         missedWins += s.wins;
         netImpact += -s.net;
       }
-      if (isSessionBlocked(tf, slot, "pm")) {
-        const s = getStats(tf, slot, "pm");
+      if (isSessionBlocked(tf, slot, "pm", hourFor5m)) {
+        const s = getStats(tf, slot, "pm", hourFor5m);
         totalBlocked += 1;
         savedLosses += s.losses;
         missedWins += s.wins;
@@ -614,6 +754,9 @@ function render() {
 
 async function init() {
   await loadBlackout();
+  const sel = document.getElementById("scopeHour5m");
+  if (sel) sel.value = selected5mHour;
+  _update5mHourScopeHint();
   render();
   loadStats().then(() => render());
   setInterval(() => render5mClock(), 30000);

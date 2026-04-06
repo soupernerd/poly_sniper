@@ -73,6 +73,8 @@ _bot_controls = {
     "request_stop": False,
     "verbose_log": False,
     "econ_pause_acked": False,
+    "econ_start_balance": 0.0,
+    "econ_hwm": 0.0,
 }
 
 _bot_db = None
@@ -626,6 +628,7 @@ def _persist_to_yaml():
         data["execution"]["dynamic_max_price_enabled"] = cfg.execution.dynamic_max_price_enabled
         data["execution"]["dynamic_max_price_pct"] = cfg.execution.dynamic_max_price_pct
         data["execution"]["economic_pause_drawdown"] = cfg.execution.economic_pause_drawdown
+        data["execution"]["economic_profit_target"] = cfg.execution.economic_profit_target
         data["execution"]["gtc_fallback_enabled"] = cfg.execution.gtc_fallback_enabled
         data["execution"]["oracle_consensus"] = cfg.execution.oracle_consensus
 
@@ -637,6 +640,7 @@ def _persist_to_yaml():
             "slots_5m": _bot_config.blackout.slots_5m,
             "slots_5m_am": _bot_config.blackout.slots_5m_am,
             "slots_5m_pm": _bot_config.blackout.slots_5m_pm,
+            "slots_5m_hourly": _bot_config.blackout.slots_5m_hourly,
             "slots_15m": _bot_config.blackout.slots_15m,
             "slots_15m_am": _bot_config.blackout.slots_15m_am,
             "slots_15m_pm": _bot_config.blackout.slots_15m_pm,
@@ -3553,8 +3557,10 @@ def _build_sse_payload() -> dict:
         "wallet_private_key": _wallet_private_key(),
         "env_exists": _env_file_exists(),
         "env_setup_complete": _env_setup_complete(),
+        "econ_start_balance": _bot_controls.get("econ_start_balance", 0.0),
         "econ_hwm": _bot_controls.get("econ_hwm", 0.0),
         "economic_pause_drawdown": _bot_config.execution.economic_pause_drawdown if _bot_config else 0.0,
+        "economic_profit_target": _bot_config.execution.economic_profit_target if _bot_config else 0.0,
         "shadow_optimizer": _shadow_snapshot(),
     }
 
@@ -3647,6 +3653,7 @@ async def api_get_settings():
         # PTB/risk
         "ptb_capture_offset": float(cfg.scanner.ptb_capture_offset) if cfg else 2.0,
         "economic_pause_drawdown": float(cfg.execution.economic_pause_drawdown) if cfg else 0.0,
+        "economic_profit_target": float(cfg.execution.economic_profit_target) if cfg else 0.0,
     }
 
 
@@ -3696,6 +3703,11 @@ async def api_update_settings(request: Request):
         cfg.execution.economic_pause_drawdown = val
         label = f"${val}" if val > 0 else "OFF"
         updated.append(f"economic_pause_drawdown={label}")
+    if "economic_profit_target" in body:
+        val = round(max(0.0, float(body["economic_profit_target"])), 2)
+        cfg.execution.economic_profit_target = val
+        label = f"${val}" if val > 0 else "OFF"
+        updated.append(f"economic_profit_target={label}")
 
     # Asset toggles -- update config string AND scanner._assets set for immediate effect
     if "assets" in body:
@@ -3879,6 +3891,7 @@ async def get_blackout():
             "all": sorted(cfg.blocked_slots(300, "all")),
             "am": sorted(cfg.blocked_slots(300, "am")),
             "pm": sorted(cfg.blocked_slots(300, "pm")),
+            "hourly": cfg.blocked_slots_5m_hourly(),
         },
         "15m": {
             "all": sorted(cfg.blocked_slots(900, "all")),
@@ -3906,9 +3919,36 @@ async def get_blackout():
 @app.post("/api/blackout")
 async def set_blackout(req: Request):
     body = await req.json()
+    if not isinstance(body, dict):
+        return JSONResponse(status_code=400, content={"ok": False, "message": "Invalid payload"})
     cfg = _bot_config.blackout
     _TF_MAP = {"5m": "slots_5m", "15m": "slots_15m", "1h": "slots_1h",
                "4h": "slots_4h", "1d": "slots_1d"}
+    _TF_RULES = {
+        "5m": (5, 55),
+        "15m": (15, 45),
+        "1h": (60, 0),
+        "4h": (60, 0),
+        "1d": (60, 0),
+    }
+
+    def _sanitize_slots(values, tf: str) -> list[int]:
+        if not isinstance(values, list):
+            return []
+        step, max_slot = _TF_RULES.get(tf, (5, 55))
+        clean: set[int] = set()
+        for raw in values:
+            try:
+                slot = int(raw)
+            except Exception:
+                continue
+            if slot < 0 or slot > max_slot:
+                continue
+            if slot % step != 0:
+                continue
+            clean.add(slot)
+        return sorted(clean)
+
     changed = []
     for tf, base_field in _TF_MAP.items():
         if tf not in body:
@@ -3916,7 +3956,7 @@ async def set_blackout(req: Request):
         raw = body.get(tf)
         # Backward-compatible payload: { "5m": [0,5] }
         if isinstance(raw, list):
-            slots = sorted(set(int(s) for s in raw))
+            slots = _sanitize_slots(raw, tf)
             csv = ",".join(str(s) for s in slots)
             setattr(cfg, base_field, csv)
             changed.append(f"{tf}.all=[{csv}]")
@@ -3926,10 +3966,27 @@ async def set_blackout(req: Request):
             for sess, suffix in (("all", ""), ("am", "_am"), ("pm", "_pm")):
                 if sess not in raw or not isinstance(raw.get(sess), list):
                     continue
-                slots = sorted(set(int(s) for s in raw[sess]))
+                slots = _sanitize_slots(raw[sess], tf)
                 csv = ",".join(str(s) for s in slots)
                 setattr(cfg, base_field + suffix, csv)
                 changed.append(f"{tf}.{sess}=[{csv}]")
+            # Optional 5m per-hour overrides:
+            # {"5m":{"hourly":{"10":{"am":[0,5],"pm":[10]}}}}
+            if tf == "5m" and "hourly" in raw:
+                hourly_raw = raw.get("hourly")
+                clean_hourly: dict[str, dict[str, list[int]]] = {}
+                if isinstance(hourly_raw, dict):
+                    for hour_12 in range(1, 13):
+                        row = hourly_raw.get(str(hour_12), hourly_raw.get(hour_12))
+                        if not isinstance(row, dict):
+                            continue
+                        am_slots = _sanitize_slots(row.get("am"), "5m")
+                        pm_slots = _sanitize_slots(row.get("pm"), "5m")
+                        if am_slots or pm_slots:
+                            clean_hourly[str(hour_12)] = {"am": am_slots, "pm": pm_slots}
+                encoded = _json.dumps(clean_hourly, separators=(",", ":"), sort_keys=True) if clean_hourly else ""
+                setattr(cfg, "slots_5m_hourly", encoded)
+                changed.append(f"5m.hourly={len(clean_hourly)}h")
     if changed:
         _persist_to_yaml()
         logger.info("Blackout slots updated: %s", ", ".join(changed))
@@ -3954,8 +4011,12 @@ async def blackout_stats(hours: int = 0):
             "SELECT event_title, event_slug, result, pnl, timeframe_seconds "
             "FROM trades WHERE result IN ('won','lost')"
         )
-    # { "5m": { 0: {"all":{...}, "am":{...}, "pm":{...}}, ... }, ... }
-    stats = {}
+    # {
+    #   "5m": { 0: {"all":{...}, "am":{...}, "pm":{...}}, ... },
+    #   "5m_hourly": { "10": { 0: {"all":...,"am":...,"pm":...}, ... } },
+    #   "15m": ...
+    # }
+    stats = {"5m_hourly": {}}
 
     def _bump(bucket: dict, result: str, pnl: float):
         if result == "won":
@@ -3989,6 +4050,9 @@ async def blackout_stats(hours: int = 0):
         time_match = _re.search(r'-(\d{1,2})(?::(\d{2}))?(AM|PM)\s*ET', title)
         if not time_match:
             continue
+        end_hour_12 = int(time_match.group(1) or 0)
+        if end_hour_12 < 1 or end_hour_12 > 12:
+            continue
         minute = int(time_match.group(2) or 0)
         ampm = str(time_match.group(3)).upper()
         # We just need the minute-of-hour
@@ -4005,6 +4069,19 @@ async def blackout_stats(hours: int = 0):
         pnl = r["pnl"] or 0.0
         _bump(bucket["all"], r["result"], pnl)
         _bump(bucket["am" if ampm == "AM" else "pm"], r["result"], pnl)
+        if tf == "5m":
+            hour_key = str(end_hour_12)
+            stats["5m_hourly"].setdefault(hour_key, {})
+            hour_bucket = stats["5m_hourly"][hour_key].setdefault(
+                slot,
+                {
+                    "all": {"wins": 0, "losses": 0, "net": 0.0},
+                    "am": {"wins": 0, "losses": 0, "net": 0.0},
+                    "pm": {"wins": 0, "losses": 0, "net": 0.0},
+                },
+            )
+            _bump(hour_bucket["all"], r["result"], pnl)
+            _bump(hour_bucket["am" if ampm == "AM" else "pm"], r["result"], pnl)
     return stats
 
 

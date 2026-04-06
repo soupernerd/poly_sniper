@@ -1,5 +1,6 @@
 """Sniper configuration -- config.yaml + .env -> Config dataclass."""
 
+import json
 import os
 from pathlib import Path
 from dataclasses import dataclass, field
@@ -266,7 +267,8 @@ class ExecutionConfig:
     swing_guard_max_pct: float = 0.05   # Max % price move tolerated between eval and execution (0.05 = 5%)
     dynamic_max_price_enabled: bool = False  # Cap execution ceiling relative to eval best_ask
     dynamic_max_price_pct: float = 0.10      # Max allowed rise vs eval ask (0.10 = +10%)
-    economic_pause_drawdown: float = 0.0     # Auto-pause if balance drops this many USD from startup snapshot (0 = off)
+    economic_pause_drawdown: float = 0.0     # Auto-turn OFF Mode 2 if balance drops this many USD below HWM (0 = off)
+    economic_profit_target: float = 0.0      # Auto-turn OFF Mode 2 once balance gains this many USD above startup (0 = off)
     gtc_fallback_enabled: bool = True        # Allow GTC limit-order fallback when FOK fails (False = FOK-only)
     no_bet_assets: str = ""              # CSV of assets to watch-only (no betting). e.g. "solana,ripple"
 
@@ -688,6 +690,10 @@ class BlackoutConfig:
     slots_4h_pm: str = ""
     slots_1d_am: str = ""
     slots_1d_pm: str = ""
+    # Optional 5m hour-scoped overrides, JSON string:
+    # {"10":{"am":[5,10],"pm":[15]}}
+    # Keys are 12-hour clock values 1..12; values are AM/PM minute slots.
+    slots_5m_hourly: str = ""
 
     _DURATION_KEY = {300: "slots_5m", 900: "slots_15m", 3600: "slots_1h",
                      14400: "slots_4h", 86400: "slots_1d"}
@@ -696,12 +702,82 @@ class BlackoutConfig:
     _DURATION_KEY_PM = {300: "slots_5m_pm", 900: "slots_15m_pm", 3600: "slots_1h_pm",
                         14400: "slots_4h_pm", 86400: "slots_1d_pm"}
     _ET = ZoneInfo("America/New_York")
+    _SLOTS_5M_HOURLY_CACHE_RAW: str = field(default="", init=False, repr=False)
+    _SLOTS_5M_HOURLY_CACHE: dict[int, dict[str, set[int]]] = field(default_factory=dict, init=False, repr=False)
 
     @staticmethod
     def _parse_slots(csv: str) -> set:
         if not csv:
             return set()
         return {int(m.strip()) for m in csv.split(",") if m.strip().isdigit()}
+
+    @staticmethod
+    def _sanitize_slot_values(values, *, step: int, max_slot: int) -> set[int]:
+        if not isinstance(values, (list, tuple, set)):
+            return set()
+        out: set[int] = set()
+        for raw in values:
+            try:
+                slot = int(raw)
+            except Exception:
+                continue
+            if slot < 0 or slot > max_slot:
+                continue
+            if slot % step != 0:
+                continue
+            out.add(slot)
+        return out
+
+    def _parse_5m_hourly(self) -> dict[int, dict[str, set[int]]]:
+        raw = str(getattr(self, "slots_5m_hourly", "") or "").strip()
+        if raw == self._SLOTS_5M_HOURLY_CACHE_RAW:
+            return self._SLOTS_5M_HOURLY_CACHE
+
+        parsed: dict[int, dict[str, set[int]]] = {}
+        if raw:
+            try:
+                obj = json.loads(raw)
+            except Exception:
+                obj = {}
+            if isinstance(obj, dict):
+                for hour_raw, row in obj.items():
+                    try:
+                        hour_12 = int(hour_raw)
+                    except Exception:
+                        continue
+                    if hour_12 < 1 or hour_12 > 12 or not isinstance(row, dict):
+                        continue
+                    am_slots = self._sanitize_slot_values(row.get("am"), step=5, max_slot=55)
+                    pm_slots = self._sanitize_slot_values(row.get("pm"), step=5, max_slot=55)
+                    if am_slots or pm_slots:
+                        parsed[hour_12] = {"am": am_slots, "pm": pm_slots}
+
+        self._SLOTS_5M_HOURLY_CACHE_RAW = raw
+        self._SLOTS_5M_HOURLY_CACHE = parsed
+        return parsed
+
+    def blocked_slots_5m_hourly(self) -> dict[str, dict[str, list[int]]]:
+        parsed = self._parse_5m_hourly()
+        out: dict[str, dict[str, list[int]]] = {}
+        for hour_12 in sorted(parsed):
+            row = parsed.get(hour_12, {})
+            am_slots = sorted(row.get("am", set()))
+            pm_slots = sorted(row.get("pm", set()))
+            if am_slots or pm_slots:
+                out[str(hour_12)] = {"am": am_slots, "pm": pm_slots}
+        return out
+
+    def blocked_slots_5m_for_hour(self, hour_12: int, session: str) -> set[int]:
+        if session not in ("am", "pm"):
+            return set()
+        try:
+            h = int(hour_12)
+        except Exception:
+            return set()
+        if h < 1 or h > 12:
+            return set()
+        parsed = self._parse_5m_hourly()
+        return set((parsed.get(h) or {}).get(session, set()))
 
     def blocked_slots(self, duration_seconds: int, session: str = "all") -> set:
         """Return set of blacklisted minute-of-hour values for a given market duration."""
@@ -727,7 +803,8 @@ class BlackoutConfig:
 
         am_slots = self.blocked_slots(duration_seconds, "am")
         pm_slots = self.blocked_slots(duration_seconds, "pm")
-        if not am_slots and not pm_slots:
+        has_hourly_5m = bool(self._parse_5m_hourly()) if int(duration_seconds or 0) == 300 else False
+        if not am_slots and not pm_slots and not has_hourly_5m:
             return False
         if end_dt is None:
             return False
@@ -735,9 +812,16 @@ class BlackoutConfig:
             end_et = end_dt.astimezone(self._ET)
         except Exception:
             return False
-        if end_et.hour < 12:
-            return end_minute in am_slots
-        return end_minute in pm_slots
+        session = "am" if end_et.hour < 12 else "pm"
+        if session == "am" and end_minute in am_slots:
+            return True
+        if session == "pm" and end_minute in pm_slots:
+            return True
+        if int(duration_seconds or 0) == 300:
+            hour_12 = end_et.hour % 12 or 12
+            if end_minute in self.blocked_slots_5m_for_hour(hour_12, session):
+                return True
+        return False
 
 
 @dataclass

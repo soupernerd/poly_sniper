@@ -29,6 +29,7 @@ from src.redeemer import Redeemer
 from src.scanner import Scanner
 from src.ws_client import MarketWSClient
 from dashboard.app import (
+    _persist_to_yaml,
     _bot_state as _dashboard_bot_state,
     get_bot_controls,
     set_bot_config,
@@ -387,6 +388,7 @@ async def main():
         balance = await api.refresh_balance()
         logger.info("Wallet balance: $%.2f", balance)
         executor.prime_balance_cache(balance)
+        get_bot_controls()["econ_start_balance"] = balance if balance and balance > 0 else 0.0
         get_bot_controls()["econ_hwm"] = balance if balance and balance > 0 else 0.0
         if balance < 1.0:
             logger.warning("Balance $%.2f < $1.00 minimum", balance)
@@ -502,31 +504,49 @@ async def main():
             prices_to_beat=pf_stats.get("prices_to_beat", 0),
         )
 
-        # Economic drawdown guard: auto-pause if balance falls below (HWM - configured drawdown).
+        # Economic risk guards:
+        # - Drawdown guard: turn OFF Mode 2 if balance falls below (HWM - configured drawdown).
+        # - Profit guard: turn OFF Mode 2 once balance reaches (startup + target gain).
         try:
             dd = float(getattr(config.execution, "economic_pause_drawdown", 0.0) or 0.0)
+            target_gain = float(getattr(config.execution, "economic_profit_target", 0.0) or 0.0)
+            current_bal = float(executor._get_cached_balance() or 0.0)
+
             if dd > 0:
-                current_bal = executor._get_cached_balance()
                 hwm = float(controls.get("econ_hwm", 0.0) or 0.0)
                 if hwm <= 0 and current_bal > 0:
                     controls["econ_hwm"] = current_bal
                     hwm = current_bal
                 floor = (hwm - dd) if hwm > 0 else None
-                if floor is not None and current_bal < floor:
-                    if not paused and not controls.get("econ_pause_acked", False):
-                        controls["paused"] = True
-                        controls["econ_pause_acked"] = True
-                        paused = True
-                        logger.warning(
-                            "[FEED: ECON-PAUSE] Balance $%.2f < floor $%.2f (HWM $%.2f - $%.2f drawdown) -- pausing.",
-                            current_bal, floor, hwm, dd,
-                        )
-                elif floor is not None and current_bal >= floor:
-                    controls["econ_pause_acked"] = False
-            else:
-                controls["econ_pause_acked"] = False
+                if floor is not None and current_bal < floor and bool(getattr(config.trend, "hft_barrier_enabled", False)):
+                    config.trend.hft_barrier_enabled = False
+                    logger.warning(
+                        "[FEED: ECON-DRAWDOWN-MODE2-OFF] Balance $%.2f < floor $%.2f (HWM $%.2f - $%.2f) -- Mode 2 OFF.",
+                        current_bal, floor, hwm, dd,
+                    )
+                    try:
+                        _persist_to_yaml()
+                    except Exception:
+                        pass
+
+            if target_gain > 0:
+                start_bal = float(controls.get("econ_start_balance", 0.0) or 0.0)
+                if start_bal <= 0 and current_bal > 0:
+                    controls["econ_start_balance"] = current_bal
+                    start_bal = current_bal
+                target_bal = (start_bal + target_gain) if start_bal > 0 else None
+                if target_bal is not None and current_bal >= target_bal and bool(getattr(config.trend, "hft_barrier_enabled", False)):
+                    config.trend.hft_barrier_enabled = False
+                    logger.warning(
+                        "[FEED: ECON-PROFIT-MODE2-OFF] Balance $%.2f >= target $%.2f (start $%.2f + $%.2f) -- Mode 2 OFF.",
+                        current_bal, target_bal, start_bal, target_gain,
+                    )
+                    try:
+                        _persist_to_yaml()
+                    except Exception:
+                        pass
         except Exception as e:
-            logger.debug("Economic pause check error: %s", e)
+            logger.debug("Economic guard check error: %s", e)
 
         now_utc = datetime.now(timezone.utc)
         should_redeem, redeem_window_id = _in_redeem_window(now_utc)
