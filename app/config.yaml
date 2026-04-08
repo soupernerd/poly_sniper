@@ -31,7 +31,7 @@ scanner:
   min_conviction_4h: 0.0
   min_conviction_1d: 0.0
   max_gap_pct: 0.0
-  price_feed: binance
+  price_feed: chainlink
   price_gap_pct: 0.0
   price_gap_pct_5m: 0.0
   price_gap_pct_15m: 0.0
@@ -53,7 +53,7 @@ scanner:
   asset_timeframe_enabled:
     bitcoin:
       5m: true
-      15m: true
+      15m: false
       1h: false
       4h: false
       1d: false
@@ -103,7 +103,7 @@ execution:
   min_edge_1h: 0.0
   min_edge_4h: 0.0
   min_edge_1d: 0.0
-  economic_pause_drawdown: 45.0
+  economic_pause_drawdown: 100.0
   gtc_fallback_enabled: false
   trading_mode: live
   economic_profit_target: 0.0
@@ -161,23 +161,23 @@ trend:
   hft_muzzle_seconds: 0
   hft_max_price: 0.75
   hft_max_price_5m: 0.75
-  hft_max_price_15m: 0.8
+  hft_max_price_15m: 0.6
   hft_max_price_1h: 0.8
   hft_barrier_enabled: true
-  hft_barrier_pct: 0.004
-  hft_barrier_pct_15m: 0.005
+  hft_barrier_pct: 0.01
+  hft_barrier_pct_15m: 0.01
   hft_barrier_pct_1h: 0.2
-  hft_barrier_delay: 0
+  hft_barrier_delay: 2
   hft_armed_sniper_enabled: true
   hft_mode2_entry_mode: ''
   hft_mode2_trigger_cooldown_ms: 150
   hft_optimizer_objective_mode: pnl
-  hft_optimizer_lookback_hours: 48
+  hft_optimizer_lookback_hours: 24
   hft_optimizer_min_trades: 0
   hft_barrier_matrix:
     bitcoin:
-      5m: 0.004
-      15m: 0.005
+      5m: 0.01
+      15m: 0.01
       1h: 0.2
     ethereum:
       5m: 0.35
@@ -194,7 +194,7 @@ trend:
   hft_max_price_matrix:
     bitcoin:
       5m: 0.75
-      15m: 0.8
+      15m: 0.6
       1h: 0.8
     ethereum:
       5m: 0.98

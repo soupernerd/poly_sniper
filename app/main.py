@@ -106,7 +106,10 @@ async def main():
     # Oracle collection is runtime-wide and independent from scanner trade toggles.
     # Keep feed scope stable so PTB data is collected consistently for all core assets.
     price_feed_assets = list(ASSET_SYMBOL_MAP.keys())
-    price_feed = BinancePriceFeed(assets=price_feed_assets)
+    price_feed = BinancePriceFeed(
+        assets=price_feed_assets,
+        primary_source=getattr(config.scanner, "price_feed", "binance"),
+    )
     market_runtime = MarketRuntime(
         config=config,
         api=api,
@@ -173,7 +176,8 @@ async def main():
     await monitor_db.init()
 
     price_feed.set_db(db._conn)
-    await price_feed.load_ptb_from_db()
+    # Do not restore PTB snapshots across restarts; require fresh live PTB
+    # capture in this runtime process before any betting decisions.
     await price_feed.start()
     await market_runtime.start()
 
@@ -182,6 +186,9 @@ async def main():
 
     def _on_hft_mode2_tick(asset, price, ts, source="binance"):
         if not getattr(config.trend, "hft_barrier_enabled", False):
+            return
+        active_source = price_feed.get_price_source(asset)
+        if active_source != source:
             return
         cooldown_ms = max(
             10,

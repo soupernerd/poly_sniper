@@ -3,7 +3,7 @@
 Single owner for:
   - discovery
   - baseline WS subscription lifecycle
-  - PTB live capture and backfill fallback
+  - PTB live capture
   - stale-market pruning
 
 Scanner/monitor consume this runtime; they do not own these paths.
@@ -554,12 +554,10 @@ class MarketRuntime:
                     self._ptb_retry_after[cid] = now_mono + self._PTB_LIVE_RETRY_SECONDS
                 continue
 
-            if cid in self._backfill_inflight:
-                continue
-            if inline_backfill:
-                await self._run_backfill(market)
-            else:
-                self._spawn_backfill_task(market)
+            # Backfill intentionally disabled for trading safety.
+            # If we missed live PTB capture for this market (e.g. startup mid-cycle),
+            # keep PTB empty and wait for the next fresh market cycle.
+            self._ptb_retry_after.pop(cid, None)
 
     def _spawn_backfill_task(self, market: RuntimeMarket):
         cid = market.condition_id

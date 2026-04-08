@@ -720,6 +720,47 @@
       align-items: center;
     }
 
+    .oracle-source-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 2px;
+      padding: 2px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: rgba(255, 255, 255, 0.04);
+    }
+
+    .oracle-source-btn {
+      border: none;
+      background: transparent;
+      color: var(--dim);
+      border-radius: 999px;
+      padding: 4px 8px;
+      font-size: 0.66em;
+      font-weight: 700;
+      letter-spacing: 0.2px;
+      cursor: pointer;
+      transition: all 0.15s;
+      min-width: 58px;
+      font-family: 'Fira Code', 'Consolas', monospace;
+    }
+
+    .oracle-source-btn:hover {
+      color: var(--text);
+      background: rgba(255, 255, 255, 0.08);
+    }
+
+    .oracle-source-btn.active {
+      color: var(--green);
+      background: rgba(34, 197, 94, 0.15);
+      border: 1px solid rgba(34, 197, 94, 0.25);
+    }
+
+    .oracle-source-btn:disabled {
+      opacity: 0.65;
+      cursor: not-allowed;
+    }
+
     .oracle-tag {
       padding: 1px 5px;
       border-radius: 3px;
@@ -1016,6 +1057,12 @@
     <h1>Poly<span>Snipe</span></h1>
     <div class="header-right">
       <span class="oracle-health" id="oracleHealth"></span>
+      <span class="oracle-source-toggle" id="oracleSourceToggle" title="Primary oracle source order">
+        <button id="sourceBtnBinance" class="oracle-source-btn active" type="button"
+          onclick="setPriceFeedSource('binance')">BN>CL</button>
+        <button id="sourceBtnChainlink" class="oracle-source-btn" type="button"
+          onclick="setPriceFeedSource('chainlink')">CL>BN</button>
+      </span>
       <span style="color: var(--green); font-weight: 600; font-size: 0.9em;" id="walletBalanceWrap">Balance: <span
           id="walletBalance">--</span></span>
       <span class="uptime" id="uptime"></span>
@@ -1437,6 +1484,8 @@
     let _setupInFlight = false;
     let _setupEnvExists = false;
     let _restartInFlight = false;
+    let _priceFeedPrimary = 'binance';
+    let _priceFeedSaveInFlight = false;
     const _setupButtonLabel = 'Generate Wallet + API Keys';
     const _RECENT_TRADES_HOURS = 48;
     const _RECENT_TRADES_REFRESH_MS = 5000;
@@ -1465,6 +1514,62 @@
         return `https://polymarket.com/profile/${addr}`;
       }
       return 'https://polymarket.com/';
+    }
+
+    function _normalizePriceFeedSource(raw) {
+      const v = String(raw || '').trim().toLowerCase();
+      return v === 'chainlink' ? 'chainlink' : 'binance';
+    }
+
+    function _priceFeedDisplayName(source) {
+      return source === 'chainlink' ? 'Chainlink' : 'Binance';
+    }
+
+    function renderPriceFeedToggle() {
+      const src = _normalizePriceFeedSource(_priceFeedPrimary);
+      const bn = $('sourceBtnBinance');
+      const cl = $('sourceBtnChainlink');
+      if (!bn || !cl) return;
+      bn.classList.toggle('active', src === 'binance');
+      cl.classList.toggle('active', src === 'chainlink');
+      bn.disabled = _priceFeedSaveInFlight;
+      cl.disabled = _priceFeedSaveInFlight;
+      bn.title = src === 'binance' ? 'Primary: Binance | Fallback: Chainlink' : 'Switch to Binance primary';
+      cl.title = src === 'chainlink' ? 'Primary: Chainlink | Fallback: Binance' : 'Switch to Chainlink primary';
+    }
+
+    async function setPriceFeedSource(source, opts = {}) {
+      const target = _normalizePriceFeedSource(source);
+      const prev = _normalizePriceFeedSource(_priceFeedPrimary);
+      const localOnly = !!opts.localOnly;
+      if (!localOnly && _priceFeedSaveInFlight) return;
+      if (target === prev && !opts.forceRender) {
+        return;
+      }
+      _priceFeedPrimary = target;
+      renderPriceFeedToggle();
+      if (localOnly) return;
+      _priceFeedSaveInFlight = true;
+      renderPriceFeedToggle();
+      try {
+        const res = await fetch('/api/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ price_feed: target }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) {
+          throw new Error(data.message || 'Failed to save price feed source');
+        }
+        showToast(`Primary oracle: ${_priceFeedDisplayName(target)}`);
+      } catch (e) {
+        _priceFeedPrimary = prev;
+        renderPriceFeedToggle();
+        showToast(e.message || 'Failed to save price feed source', true);
+      } finally {
+        _priceFeedSaveInFlight = false;
+        renderPriceFeedToggle();
+      }
     }
 
     function showToast(msg, isError) {
@@ -2311,6 +2416,13 @@
         renderAssetTfRows();
         renderTfToggles();
       }
+      if (typeof data.price_feed === 'string') {
+        const freshSource = _normalizePriceFeedSource(data.price_feed);
+        if (freshSource !== _priceFeedPrimary) {
+          _priceFeedPrimary = freshSource;
+          renderPriceFeedToggle();
+        }
+      }
 
       // Oracle health indicator
       if (data.oracle_health) updateOracleHealth(data.oracle_health);
@@ -2755,6 +2867,8 @@
         // HFT state is loaded from dedicated HFT settings API
         await loadTrendState();
         $('setPtbOffset').value = r.ptb_capture_offset != null ? r.ptb_capture_offset : 2.0;
+        _priceFeedPrimary = _normalizePriceFeedSource(r.price_feed);
+        renderPriceFeedToggle();
         // Economic guards
         $('setEconDrawdown').value = r.economic_pause_drawdown != null ? r.economic_pause_drawdown : 0;
         $('setEconProfitTarget').value = r.economic_profit_target != null ? r.economic_profit_target : 0;
@@ -3030,6 +3144,7 @@
     }
 
     (async function initDashboard() {
+      renderPriceFeedToggle();
       await loadSettings();
       connectSSE();
       refreshRecentTrades();

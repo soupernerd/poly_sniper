@@ -101,6 +101,7 @@ _SCANNER_TOGGLE_ASSETS: tuple[str, ...] = ("bitcoin", "ethereum", "solana", "xrp
 _SCANNER_TOGGLE_TFS: tuple[str, ...] = ("5m", "15m", "1h", "4h", "1d")
 _SCANNER_TF_LABEL_TO_SECONDS: dict[str, int] = {"5m": 300, "15m": 900, "1h": 3600, "4h": 14400, "1d": 86400}
 _SCANNER_TF_SECONDS_TO_LABEL: dict[int, str] = {v: k for k, v in _SCANNER_TF_LABEL_TO_SECONDS.items()}
+_PRICE_FEED_SOURCES: tuple[str, ...] = ("binance", "chainlink")
 try:
     _ET_ZONE = ZoneInfo("America/New_York")
 except Exception:
@@ -165,6 +166,13 @@ def _parse_scanner_assets(raw: str) -> list[str]:
 
 def _parse_scanner_tfs(raw: str) -> list[str]:
     return [tf.strip().lower() for tf in str(raw or "").split(",") if tf.strip().lower() in _SCANNER_TOGGLE_TFS]
+
+
+def _normalize_price_feed_source(raw: object, default: str = "binance") -> str:
+    src = str(raw or "").strip().lower()
+    if src in _PRICE_FEED_SOURCES:
+        return src
+    return default
 
 
 def _coerce_bool(raw) -> bool:
@@ -578,6 +586,10 @@ def _persist_to_yaml():
         data["scanner"]["stop_buffer_seconds"] = getattr(cfg.scanner, 'stop_buffer_seconds', 0)
         data["scanner"]["start_buffer_seconds"] = getattr(cfg.scanner, 'start_buffer_seconds', 0)
         data["scanner"]["ptb_capture_offset"] = cfg.scanner.ptb_capture_offset
+        data["scanner"]["price_feed"] = _normalize_price_feed_source(
+            getattr(cfg.scanner, "price_feed", "binance"),
+            "binance",
+        )
         data["scanner"]["min_conviction"] = cfg.scanner.min_conviction
         data["scanner"]["min_conviction_5m"] = cfg.scanner.min_conviction_5m
         data["scanner"]["min_conviction_15m"] = cfg.scanner.min_conviction_15m
@@ -3586,6 +3598,7 @@ def _build_sse_payload() -> dict:
         "assets": active_assets,
         "time_frames": cfg.scanner.time_frames if cfg else "5m,15m,1h,4h,1d",
         "asset_timeframe_enabled": cfg.scanner.get_asset_timeframe_enabled_matrix() if cfg else _default_scanner_asset_tf_matrix(),
+        "price_feed": _normalize_price_feed_source(getattr(cfg.scanner, "price_feed", "binance"), "binance") if cfg else "binance",
         "verbose_log": _bot_controls.get("verbose_log", False),
         "oracle_health": oracle_health,
         "wallet_balance": _get_cached_balance(),
@@ -3690,6 +3703,7 @@ async def api_get_settings():
         "ws_cleanup_delay": cleanup_delay,
         # PTB/risk
         "ptb_capture_offset": float(cfg.scanner.ptb_capture_offset) if cfg else 2.0,
+        "price_feed": _normalize_price_feed_source(getattr(cfg.scanner, "price_feed", "binance"), "binance") if cfg else "binance",
         "economic_pause_drawdown": float(cfg.execution.economic_pause_drawdown) if cfg else 0.0,
         "economic_profit_target": float(cfg.execution.economic_profit_target) if cfg else 0.0,
     }
@@ -3734,6 +3748,16 @@ async def api_update_settings(request: Request):
         val = round(max(0.0, min(10.0, float(body["ptb_capture_offset"]))), 1)
         cfg.scanner.ptb_capture_offset = val
         updated.append(f"ptb_capture_offset={val}s")
+
+    if "price_feed" in body:
+        val = _normalize_price_feed_source(body.get("price_feed"), getattr(cfg.scanner, "price_feed", "binance"))
+        cfg.scanner.price_feed = val
+        updated.append(f"price_feed={val}")
+        if _bot_price_feed is not None:
+            try:
+                _bot_price_feed.set_primary_source(val)
+            except Exception as exc:
+                logger.warning("Failed to hot-apply price_feed=%s: %s", val, exc)
 
     # Economic pause (drawdown guard)
     if "economic_pause_drawdown" in body:

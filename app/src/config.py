@@ -142,7 +142,7 @@ class ScannerConfig:
         )
 
     # -- Price-gap safety gate (Binance feed) --
-    price_feed: str = "binance"          # Price data source
+    price_feed: str = "binance"          # Primary price source: "binance" or "chainlink"
     price_gap_pct: float = 0.30          # Default min % gap from price-to-beat (global fallback)
     ptb_capture_offset: float = 1.5      # Capture PTB this many seconds BEFORE market_start
                                           # Aligns with Polymarket's PTB (end of prior candle)

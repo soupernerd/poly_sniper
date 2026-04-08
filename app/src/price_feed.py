@@ -1,21 +1,14 @@
-"""Dual-source price feed -- Chainlink (primary) + Binance (fallback).
+"""Dual-source price feed with runtime-selectable primary/fallback.
 
-Primary:  Polymarket RTDS Chainlink Data Streams (exact resolution oracle)
-Fallback: Binance combined WebSocket stream (secondary / backfill)
-
-The Chainlink feed delivers the *exact* prices Polymarket uses to resolve
-Up/Down markets, eliminating oracle-divergence risk when computing the gap.
-Binance remains as a hot fallback (if RTDS drops) and for historical backfill
-(klines at market start for already-in-progress markets).
+Sources:
+  - Chainlink RTDS via Polymarket
+  - Binance combined WebSocket stream
 
 Architecture:
-  - RTDS WebSocket (Chainlink): wss://ws-live-data.polymarket.com
-      • Topic: crypto_prices_chainlink  • ~1 tick/sec per symbol
-  - Binance combined WS: wss://stream.binance.com:9443/stream?streams=...
-      • 24hr ticker feed  • ~1 tick/sec per symbol
-  - REST kline backfill (Binance): https://api.binance.com/api/v3/klines
-  - get_price() prefers Chainlink, falls back to Binance
-  - Auto-reconnect with exponential backoff on both feeds
+  - Chainlink RTDS: wss://ws-live-data.polymarket.com
+  - Binance WS: wss://stream.binance.com:9443/stream?streams=...
+  - Binance REST klines: https://api.binance.com/api/v3/klines
+  - get_price() uses configured primary source with automatic fallback
 """
 
 import asyncio
@@ -60,22 +53,29 @@ _INITIAL_BACKOFF = 1.0
 _MAX_BACKOFF = 30.0           # General cap (Binance WS)
 _MAX_BACKOFF_RTDS = 30.0      # RTDS cap (10s floor → 20s → 30s ceiling)
 _BACKOFF_MULTIPLIER = 2.0
+_BINANCE_STALE_SECONDS = 30.0
+_CHAINLINK_STALE_SECONDS = 15.0
+_VALID_PRIMARY_SOURCES = {"binance", "chainlink"}
 
 
 class BinancePriceFeed:
-    """Dual-source price feed: Chainlink RTDS (primary) + Binance WS (fallback).
+    """Dual-source price feed with runtime-selectable primary/fallback.
 
     Usage:
-        feed = BinancePriceFeed(assets=["bitcoin", "ethereum", "solana", "xrp"])
+        feed = BinancePriceFeed(
+            assets=["bitcoin", "ethereum", "solana", "xrp"],
+            primary_source="binance",
+        )
         await feed.start()
-        price = feed.get_price("bitcoin")       # -> 97432.50  (prefers Chainlink)
+        price = feed.get_price("bitcoin")
         snap  = feed.get_snapshot("bitcoin")     # -> {price, bid, ask, volume_24h, updated_at}
         await feed.stop()
     """
 
-    def __init__(self, assets: Optional[list[str]] = None):
+    def __init__(self, assets: Optional[list[str]] = None, primary_source: str = "binance"):
         self._assets = assets or list(ASSET_SYMBOL_MAP.keys())
         self._symbols = [ASSET_SYMBOL_MAP[a] for a in self._assets if a in ASSET_SYMBOL_MAP]
+        self._primary_source = self._normalize_primary_source(primary_source)
 
         # Binance live price cache: asset -> {price, bid, ask, volume_24h, updated_at}
         self._cache: dict[str, dict] = {}
@@ -112,54 +112,137 @@ class BinancePriceFeed:
         self._ticks_received = 0
         self._last_tick_at = 0.0
         self._reconnect_count = 0
-        self._stale_warned: set[str] = set()  # State-transition dedup for stale price warnings
-        self._fallback_warned: set[str] = set()  # State-transition dedup for Chainlink->Binance fallback
+        self._stale_warned: set[str] = set()  # State-transition dedup for stale warnings (asset:source)
+        self._fallback_warned: set[str] = set()  # State-transition dedup for fallback warnings (asset:source)
 
         # External price-update callbacks (e.g. TrendAnalyzer.update_price)
         self._on_price_callbacks: list = []
 
-    # -- Public API --
+    @staticmethod
+    def _normalize_primary_source(source: str) -> str:
+        src = str(source or "").strip().lower()
+        return src if src in _VALID_PRIMARY_SOURCES else "binance"
+
+    @staticmethod
+    def _source_label(source: str) -> str:
+        return "Chainlink" if source == "chainlink" else "Binance"
+
+    @staticmethod
+    def _source_stale_seconds(source: str) -> float:
+        return _CHAINLINK_STALE_SECONDS if source == "chainlink" else _BINANCE_STALE_SECONDS
+
+    def _source_entry(self, asset: str, source: str) -> Optional[dict]:
+        if source == "chainlink":
+            return self._chainlink_cache.get(asset)
+        if source == "binance":
+            return self._cache.get(asset)
+        return None
+
+    def _source_age(self, asset: str, source: str) -> Optional[float]:
+        entry = self._source_entry(asset, source)
+        if not entry:
+            return None
+        try:
+            return time.time() - float(entry.get("updated_at", 0.0))
+        except Exception:
+            return None
+
+    def _fresh_source_entry(self, asset: str, source: str) -> Optional[dict]:
+        entry = self._source_entry(asset, source)
+        if not entry:
+            return None
+        age = self._source_age(asset, source)
+        if age is None:
+            return None
+        if age <= self._source_stale_seconds(source):
+            return entry
+        return None
+
+    @staticmethod
+    def _fallback_source(source: str) -> str:
+        return "chainlink" if source == "binance" else "binance"
+
+    @staticmethod
+    def _warn_key(asset: str, source: str) -> str:
+        return f"{asset}:{source}"
+
+    def get_primary_source(self) -> str:
+        return self._primary_source
+
+    def set_primary_source(self, source: str) -> str:
+        """Hot-switch active primary source ("binance" or "chainlink")."""
+        normalized = self._normalize_primary_source(source)
+        if normalized == self._primary_source:
+            return self._primary_source
+        old = self._primary_source
+        self._primary_source = normalized
+        # Reset state-transition warnings after source-order flips.
+        self._fallback_warned.clear()
+        self._stale_warned.clear()
+        logger.info(
+            "[FEED: SOURCE] Primary switched: %s -> %s (fallback=%s)",
+            self._source_label(old),
+            self._source_label(self._primary_source),
+            self._source_label(self._fallback_source(self._primary_source)),
+        )
+        return self._primary_source
 
     def get_price(self, asset: str) -> Optional[float]:
         """Get the current price for an asset.
 
-        Prefers Binance (fastest ticks, ~1s ahead).
-        Falls back to Chainlink if Binance is stale/unavailable.
+        Uses configured primary source first, then falls back.
         Returns None if neither source has data.
         """
-        # Try Binance first (fastest feed)
-        entry = self._cache.get(asset)
-        if entry and (time.time() - entry["updated_at"]) <= 30:
-            # Clear stale/fallback flags on recovery
-            if asset in self._stale_warned:
-                self._stale_warned.discard(asset)
-                logger.info("Binance price recovered for %s", asset)
-            if asset in self._fallback_warned:
-                self._fallback_warned.discard(asset)
-            return entry["price"]
+        primary = self._primary_source
+        secondary = self._fallback_source(primary)
+        p_key = self._warn_key(asset, primary)
+        s_key = self._warn_key(asset, secondary)
 
-        # Binance unavailable — log once per state transition
-        if asset not in self._fallback_warned:
-            self._fallback_warned.add(asset)
-            bn_age = (f", last tick {time.time() - entry['updated_at']:.0f}s ago"
-                      if entry else ", no data")
-            logger.warning("[FEED: ORACLE FALLBACK] Binance stale for %s%s — falling back to Chainlink", asset, bn_age)
+        primary_entry = self._fresh_source_entry(asset, primary)
+        if primary_entry:
+            if p_key in self._fallback_warned:
+                self._fallback_warned.discard(p_key)
+            if p_key in self._stale_warned:
+                self._stale_warned.discard(p_key)
+                logger.info("%s price recovered for %s", self._source_label(primary), asset)
+            return primary_entry["price"]
 
-        # Fallback to Chainlink
-        cl_entry = self._chainlink_cache.get(asset)
-        if not cl_entry:
-            return None
-        if time.time() - cl_entry["updated_at"] > 15:
-            if asset not in self._stale_warned:
-                self._stale_warned.add(asset)
-                logger.warning("Chainlink price stale for %s (%.1fs old) — "
-                               "gap gate will pass-through until recovery",
-                               asset, time.time() - cl_entry["updated_at"])
-            return None
-        if asset in self._stale_warned:
-            self._stale_warned.discard(asset)
-            logger.info("Chainlink price recovered for %s", asset)
-        return cl_entry["price"]
+        if p_key not in self._fallback_warned:
+            self._fallback_warned.add(p_key)
+            age = self._source_age(asset, primary)
+            age_str = f", last tick {age:.0f}s ago" if age is not None else ", no data"
+            logger.warning(
+                "[FEED: ORACLE FALLBACK] %s stale for %s%s -- falling back to %s",
+                self._source_label(primary),
+                asset,
+                age_str,
+                self._source_label(secondary),
+            )
+
+        secondary_entry = self._fresh_source_entry(asset, secondary)
+        if secondary_entry:
+            if s_key in self._stale_warned:
+                self._stale_warned.discard(s_key)
+                logger.info("%s price recovered for %s", self._source_label(secondary), asset)
+            return secondary_entry["price"]
+
+        if s_key not in self._stale_warned:
+            self._stale_warned.add(s_key)
+            sec_age = self._source_age(asset, secondary)
+            if sec_age is None:
+                logger.warning(
+                    "%s unavailable for %s -- gap gate will pass-through until recovery",
+                    self._source_label(secondary),
+                    asset,
+                )
+            else:
+                logger.warning(
+                    "%s price stale for %s (%.1fs old) -- gap gate will pass-through until recovery",
+                    self._source_label(secondary),
+                    asset,
+                    sec_age,
+                )
+        return None
 
     def get_snapshot(self, asset: str) -> Optional[dict]:
         """Get full price snapshot for an asset."""
@@ -170,12 +253,12 @@ class BinancePriceFeed:
 
         Returns "binance", "chainlink", or "none".
         """
-        entry = self._cache.get(asset)
-        if entry and (time.time() - entry["updated_at"]) <= 30:
-            return "binance"
-        cl_entry = self._chainlink_cache.get(asset)
-        if cl_entry and (time.time() - cl_entry["updated_at"]) <= 15:
-            return "chainlink"
+        primary = self._primary_source
+        secondary = self._fallback_source(primary)
+        if self._fresh_source_entry(asset, primary):
+            return primary
+        if self._fresh_source_entry(asset, secondary):
+            return secondary
         return "none"
 
     def get_price_to_beat(self, condition_id: str) -> Optional[dict]:
@@ -246,7 +329,7 @@ class BinancePriceFeed:
                                label: str = "") -> Optional[float]:
         """Snapshot the current price as the price_to_beat for a market.
 
-        Prefers Binance (fastest ticks).
+        Uses configured primary source (with fallback).
         NEVER overwrites a backfill PTB — backfill has the exact historical
         price at market start, which is always more accurate than "right now."
 
@@ -275,9 +358,17 @@ class BinancePriceFeed:
         # Snapshot BOTH oracle prices at capture time for consensus checks.
         # Each oracle should be compared against its own baseline, not the other's.
         cl_entry = self._chainlink_cache.get(asset)
-        cl_price = cl_entry["price"] if cl_entry and (time.time() - cl_entry["updated_at"]) <= 15 else None
+        cl_price = (
+            cl_entry["price"]
+            if cl_entry and (time.time() - cl_entry["updated_at"]) <= _CHAINLINK_STALE_SECONDS
+            else None
+        )
         bn_entry = self._cache.get(asset)
-        bn_price = bn_entry["price"] if bn_entry and (time.time() - bn_entry["updated_at"]) <= 30 else None
+        bn_price = (
+            bn_entry["price"]
+            if bn_entry and (time.time() - bn_entry["updated_at"]) <= _BINANCE_STALE_SECONDS
+            else None
+        )
 
         self._price_to_beat[condition_id] = {
             "asset": asset,
@@ -378,7 +469,7 @@ class BinancePriceFeed:
             cl_entry = self._chainlink_cache.get(asset)
             cl_price = (
                 cl_entry["price"]
-                if cl_entry and (time.time() - cl_entry["updated_at"]) <= 30
+                if cl_entry and (time.time() - cl_entry["updated_at"]) <= _CHAINLINK_STALE_SECONDS
                 else None
             )
 
@@ -431,24 +522,59 @@ class BinancePriceFeed:
             return None
 
         asset = ptb["asset"]
-        current = self.get_price(asset)
-        if current is None:
-            return None
-
-        current_oracle = self.get_price_source(asset)
         ptb_oracle = ptb.get("oracle", ptb.get("source", "unknown"))
+        ptb_source = str(ptb.get("source", "") or "").strip().lower()
 
-        # SAFETY: prefer same-source comparison to avoid cross-oracle offset.
-        # If PTB was captured from Chainlink but current source is Binance
-        # (or vice versa), use the per-oracle PTB if available so the gap
-        # is measured within the same feed.  Fall back to the generic PTB
-        # only when per-oracle data is unavailable.
-        if current_oracle == "chainlink" and ptb.get("ptb_chainlink") is not None:
-            price_to_beat = ptb["ptb_chainlink"]
-        elif current_oracle == "binance" and ptb.get("ptb_binance") is not None:
-            price_to_beat = ptb["ptb_binance"]
+        preferred = self.get_price_source(asset)
+        if preferred == "none":
+            return None
+        fallback = self._fallback_source(preferred)
+
+        current_by = {
+            "chainlink": None,
+            "binance": None,
+        }
+        for src in ("chainlink", "binance"):
+            entry = self._fresh_source_entry(asset, src)
+            if entry is not None:
+                current_by[src] = float(entry["price"])
+
+        ptb_by = {
+            "chainlink": ptb.get("ptb_chainlink"),
+            "binance": ptb.get("ptb_binance"),
+        }
+
+        # Backfill baseline is Binance kline-based; keep matching oracle math.
+        # When Binance current is unavailable, fail closed instead of mixing feeds.
+        if ptb_source == "backfill":
+            bn_cur = current_by.get("binance")
+            bn_ptb = ptb_by.get("binance")
+            if bn_cur is None:
+                return None
+            if bn_ptb is None:
+                generic = ptb.get("price")
+                if generic is None:
+                    return None
+                bn_ptb = generic
+            current_oracle = "binance"
+            current = bn_cur
+            price_to_beat = float(bn_ptb)
         else:
-            price_to_beat = ptb["price"]  # generic (best available at capture)
+            selected = None
+            for src in (preferred, fallback):
+                cur = current_by.get(src)
+                baseline = ptb_by.get(src)
+                # Legacy compatibility: old PTB blobs may have only generic price + oracle marker.
+                if baseline is None and str(ptb_oracle).lower() == src and ptb.get("price") is not None:
+                    baseline = ptb.get("price")
+                if cur is None or baseline is None:
+                    continue
+                selected = (src, float(cur), float(baseline))
+                break
+            if selected is None:
+                # No same-source comparison available; avoid cross-oracle math.
+                return None
+            current_oracle, current, price_to_beat = selected
 
         gap_abs = current - price_to_beat
         gap_pct = abs(gap_abs / price_to_beat) * 100 if price_to_beat > 0 else 0
@@ -498,11 +624,19 @@ class BinancePriceFeed:
 
         # Read Chainlink cache directly
         cl_entry = self._chainlink_cache.get(asset)
-        cl_price = cl_entry["price"] if cl_entry and (time.time() - cl_entry["updated_at"]) <= 15 else None
+        cl_price = (
+            cl_entry["price"]
+            if cl_entry and (time.time() - cl_entry["updated_at"]) <= _CHAINLINK_STALE_SECONDS
+            else None
+        )
 
         # Read Binance cache directly
         bn_entry = self._cache.get(asset)
-        bn_price = bn_entry["price"] if bn_entry and (time.time() - bn_entry["updated_at"]) <= 30 else None
+        bn_price = (
+            bn_entry["price"]
+            if bn_entry and (time.time() - bn_entry["updated_at"]) <= _BINANCE_STALE_SECONDS
+            else None
+        )
 
         # Determine each oracle's direction against its OWN PTB
         # Per PM rules: strictly above = Up, equal or below = Down
@@ -562,6 +696,7 @@ class BinancePriceFeed:
     def get_stats(self) -> dict:
         """Return feed stats for dashboard / logging."""
         return {
+            "primary_source": self._primary_source,
             "connected": self._connected,
             "ticks": self._ticks_received,
             "last_tick_age": round(time.time() - self._last_tick_at, 1) if self._last_tick_at else None,
@@ -603,26 +738,22 @@ class BinancePriceFeed:
         cl_assets = {}
         for asset, entry in self._chainlink_cache.items():
             age = now - entry["updated_at"]
-            cl_assets[asset] = {"price": round(entry["price"], 4), "age": round(age, 1), "fresh": age <= 15}
+            cl_assets[asset] = {"price": round(entry["price"], 4), "age": round(age, 1), "fresh": age <= _CHAINLINK_STALE_SECONDS}
 
         bn_assets = {}
         for asset, entry in self._cache.items():
             age = now - entry["updated_at"]
-            bn_assets[asset] = {"price": round(entry["price"], 4), "age": round(age, 1), "fresh": age <= 30}
+            bn_assets[asset] = {"price": round(entry["price"], 4), "age": round(age, 1), "fresh": age <= _BINANCE_STALE_SECONDS}
 
         per_asset = {}
         for asset in self._assets:
             cl_ok = asset in cl_assets and cl_assets[asset]["fresh"]
             bn_ok = asset in bn_assets and bn_assets[asset]["fresh"]
-            if cl_ok:
-                source = "chainlink"
-            elif bn_ok:
-                source = "binance"
-            else:
-                source = "none"
+            source = self.get_price_source(asset)
             per_asset[asset] = {"active_source": source, "chainlink_ok": cl_ok, "binance_ok": bn_ok}
 
         return {
+            "primary_source": self._primary_source,
             "chainlink": {
                 "connected": self._rtds_connected,
                 "ticks": self._rtds_ticks,
@@ -654,7 +785,7 @@ class BinancePriceFeed:
         old = set(self._assets)
         self._assets = list(assets)
         self._symbols = new_symbols
-        logger.info("Binance feed assets updated: %s -> reconnecting WS", self._assets)
+        logger.info("Price feed assets updated: %s -> reconnecting WS", self._assets)
 
         # Purge cache + price_to_beat entries for removed assets
         removed = old - set(self._assets)
@@ -683,8 +814,13 @@ class BinancePriceFeed:
         self._rtds_session = aiohttp.ClientSession()
         self._task = asyncio.create_task(self._run_loop())
         self._rtds_task = asyncio.create_task(self._rtds_run_loop())
-        logger.info("Price feed starting -- Chainlink RTDS (primary) + Binance (fallback) -- assets: %s",
-                     ", ".join(self._assets))
+        secondary = self._fallback_source(self._primary_source)
+        logger.info(
+            "Price feed starting -- primary=%s fallback=%s -- assets: %s",
+            self._source_label(self._primary_source),
+            self._source_label(secondary),
+            ", ".join(self._assets),
+        )
 
     async def stop(self):
         """Stop both feeds and clean up."""

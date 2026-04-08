@@ -1752,8 +1752,8 @@ class Scanner:
 
             gap_info = self._price_feed.compute_gap(m.condition_id) if self._price_feed else None
             if not gap_info:
-                # PTB not ready yet.  The main scan loop handles PTB capture
-                # (live or backfill). HFT simply waits for it to appear.
+                # PTB not ready yet. The main scan loop handles live PTB capture.
+                # HFT simply waits for it to appear.
                 continue
 
             threshold2 = float(self.config.trend.get_hft_barrier_pct_for(m.asset, m.duration_seconds))
