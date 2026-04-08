@@ -1438,6 +1438,10 @@
     let _setupEnvExists = false;
     let _restartInFlight = false;
     const _setupButtonLabel = 'Generate Wallet + API Keys';
+    const _RECENT_TRADES_HOURS = 48;
+    const _RECENT_TRADES_REFRESH_MS = 5000;
+    let _recentTradesPoll = null;
+    let _recentTradesFetchInFlight = false;
 
     function _updateBadgeSSE() {
       const badge = $('statusBadge');
@@ -1574,6 +1578,55 @@
     function assetBadge(asset) {
       const cls = 'asset-badge asset-' + (asset || '').toLowerCase();
       return `<span class="${cls}">${(asset || '?').toUpperCase()}</span>`;
+    }
+
+    function renderRecentTrades(trades) {
+      const rows = Array.isArray(trades) ? trades : [];
+      if (rows.length === 0) {
+        $('tradesTable').innerHTML = '<div class="empty">No trades in the last 48 hours</div>';
+        return;
+      }
+      let html = '<table><tr><th>Time</th><th>Market</th><th>Outcome</th><th>Shares</th><th>Price</th><th>Amount</th><th>Edge</th><th>Result</th></tr>';
+      for (const t of rows) {
+        const raw = t.timestamp || '';
+        const d = new Date(raw.endsWith('Z') ? raw : raw + 'Z');
+        const time = isNaN(d) ? raw.substring(11, 19) : d.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true });
+        const res = t.result || 'pending';
+        let resHtml;
+        if (res === 'won') resHtml = '<span style="color:var(--green);font-weight:600">WON</span>';
+        else if (res === 'lost') resHtml = '<span style="color:var(--red, #ff5555);font-weight:600">LOST</span>';
+        else if (res === 'sold') resHtml = '<span style="color:var(--yellow, #eab308);font-weight:600">SOLD (FOK)</span>';
+        else resHtml = '<span style="color:var(--dim)">pending</span>';
+        const pnlVal = t.pnl != null ? t.pnl : null;
+        const pnlStr = pnlVal != null ? (pnlVal >= 0 ? '+$' : '-$') + Math.abs(pnlVal).toFixed(2) : '';
+        const pnlColor = pnlVal != null ? (pnlVal >= 0 ? 'var(--green)' : 'var(--red, #ff5555)') : 'var(--dim)';
+        html += `<tr>
+        <td class="mono">${time}</td>
+        <td>${assetBadge(t.asset)} ${marketLink(t.event_title, 65, t.condition_id)}</td>
+        <td class="green">${t.outcome}</td>
+        <td class="mono">${(t.shares || 0).toFixed(4)}</td>
+        <td class="mono">$${(t.price || 0).toFixed(4)}</td>
+        <td class="mono">$${(t.amount || 0).toFixed(2)}</td>
+        <td class="mono green">$${(t.edge || 0).toFixed(4)}</td>
+        <td>${resHtml}${pnlStr ? ' <span class="mono" style="color:' + pnlColor + ';font-size:0.85em">' + pnlStr + '</span>' : ''}</td>
+      </tr>`;
+      }
+      html += '</table>';
+      $('tradesTable').innerHTML = html;
+    }
+
+    async function refreshRecentTrades() {
+      if (_recentTradesFetchInFlight) return;
+      _recentTradesFetchInFlight = true;
+      try {
+        const r = await fetch('/api/trades/recent?hours=' + _RECENT_TRADES_HOURS, { cache: 'no-store' });
+        const d = await r.json();
+        if (!r.ok || !d.ok) return;
+        renderRecentTrades(d.trades || []);
+      } catch (_) {
+      } finally {
+        _recentTradesFetchInFlight = false;
+      }
     }
 
     function formatUptime() {
@@ -2307,72 +2360,28 @@
         $('positionsTable').innerHTML = '<div class="empty">No open positions</div>';
       }
 
-      // Trades
-      const allTrades = data.trades || [];
-      if (allTrades.length > 0) {
-        const cutoffMs = Date.now() - (48 * 60 * 60 * 1000);
-        const recentTrades = allTrades.filter(t => {
-          const raw = t.timestamp || '';
-          const ts = new Date(raw.endsWith('Z') ? raw : raw + 'Z').getTime();
-          return Number.isFinite(ts) && ts >= cutoffMs;
-        });
-        // Net P&L - server sums ALL trades (not just the 50 shown)
-        const allTimePnl = data.total_pnl || 0;
-        const pnlEl = $('statPnl');
-        pnlEl.textContent = (allTimePnl >= 0 ? '+$' : '-$') + Math.abs(allTimePnl).toFixed(2);
-        pnlEl.className = 'value ' + (allTimePnl >= 0 ? 'green' : 'red');
-        // $/Hour - session trades only (sum from visible trade rows)
-        let sessionPnl = 0;
-        const sessionStart = _startedAt ? new Date(_startedAt).getTime() : 0;
-        if (sessionStart) {
-          for (const t of allTrades) {
-            if (t.pnl == null) continue;
-            const raw = t.timestamp || '';
-            const ts = new Date(raw.endsWith('Z') ? raw : raw + 'Z').getTime();
-            if (ts >= sessionStart) sessionPnl += t.pnl;
-          }
-          const hrs = (Date.now() - sessionStart) / 3600000;
-          if (hrs > 0.01) {
-            const rate = sessionPnl / hrs;
-            const perHourEl = $('statPerHour');
-            perHourEl.textContent = (rate >= 0 ? '+$' : '-$') + Math.abs(rate).toFixed(2);
-            perHourEl.className = 'value ' + (rate >= 0 ? 'green' : 'red');
-          }
-        }
+      // PnL stats
+      const allTimePnl = Number(data.total_pnl || 0);
+      const pnlEl = $('statPnl');
+      pnlEl.textContent = (allTimePnl >= 0 ? '+$' : '-$') + Math.abs(allTimePnl).toFixed(2);
+      pnlEl.className = 'value ' + (allTimePnl >= 0 ? 'green' : 'red');
 
-        if (recentTrades.length > 0) {
-          let html = '<table><tr><th>Time</th><th>Market</th><th>Outcome</th><th>Shares</th><th>Price</th><th>Amount</th><th>Edge</th><th>Result</th></tr>';
-          for (const t of recentTrades) {
-            const raw = t.timestamp || '';
-            const d = new Date(raw.endsWith('Z') ? raw : raw + 'Z');
-            const time = isNaN(d) ? raw.substring(11, 19) : d.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true });
-            const res = t.result || 'pending';
-            let resHtml;
-            if (res === 'won') resHtml = '<span style="color:var(--green);font-weight:600">WON</span>';
-            else if (res === 'lost') resHtml = '<span style="color:var(--red, #ff5555);font-weight:600">LOST</span>';
-            else if (res === 'sold') resHtml = '<span style="color:var(--yellow, #eab308);font-weight:600">SOLD (FOK)</span>';
-            else resHtml = '<span style="color:var(--dim)">pending</span>';
-            const pnlVal = t.pnl != null ? t.pnl : null;
-            const pnlStr = pnlVal != null ? (pnlVal >= 0 ? '+$' : '-$') + Math.abs(pnlVal).toFixed(2) : '';
-            const pnlColor = pnlVal != null ? (pnlVal >= 0 ? 'var(--green)' : 'var(--red, #ff5555)') : 'var(--dim)';
-            html += `<tr>
-        <td class="mono">${time}</td>
-        <td>${assetBadge(t.asset)} ${marketLink(t.event_title, 65, t.condition_id)}</td>
-        <td class="green">${t.outcome}</td>
-        <td class="mono">${(t.shares || 0).toFixed(4)}</td>
-        <td class="mono">$${(t.price || 0).toFixed(4)}</td>
-        <td class="mono">$${(t.amount || 0).toFixed(2)}</td>
-        <td class="mono green">$${(t.edge || 0).toFixed(4)}</td>
-        <td>${resHtml}${pnlStr ? ' <span class="mono" style="color:' + pnlColor + ';font-size:0.85em">' + pnlStr + '</span>' : ''}</td>
-      </tr>`;
-          }
-          html += '</table>';
-          $('tradesTable').innerHTML = html;
+      const perHourEl = $('statPerHour');
+      const sessionStart = _startedAt ? new Date(_startedAt).getTime() : 0;
+      if (sessionStart) {
+        const hrs = (Date.now() - sessionStart) / 3600000;
+        if (hrs > 0.01) {
+          const sessionPnl = Number(data.session_pnl || 0);
+          const rate = sessionPnl / hrs;
+          perHourEl.textContent = (rate >= 0 ? '+$' : '-$') + Math.abs(rate).toFixed(2);
+          perHourEl.className = 'value ' + (rate >= 0 ? 'green' : 'red');
         } else {
-          $('tradesTable').innerHTML = '<div class="empty">No trades in the last 48 hours</div>';
+          perHourEl.textContent = '+$0.00';
+          perHourEl.className = 'value green';
         }
       } else {
-        $('tradesTable').innerHTML = '<div class="empty">No trades yet</div>';
+        perHourEl.textContent = '+$0.00';
+        perHourEl.className = 'value green';
       }
 
       // Log
@@ -3023,6 +3032,10 @@
     (async function initDashboard() {
       await loadSettings();
       connectSSE();
+      refreshRecentTrades();
+      if (!_recentTradesPoll) {
+        _recentTradesPoll = setInterval(refreshRecentTrades, _RECENT_TRADES_REFRESH_MS);
+      }
       refreshShadowOptimizerV2();
       // Resolve slug links once on load (triggers API resolution for older trades)
       fetch('/api/market-slugs').then(r => r.json()).then(s => Object.assign(_slugMap, s)).catch(() => { });

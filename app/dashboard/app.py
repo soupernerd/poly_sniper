@@ -3200,16 +3200,39 @@ async def api_all_positions():
     return {"ok": True, "positions": rows}
 
 
+def _recent_trades_window(hours: int = 48) -> tuple[int, str, list[dict]]:
+    try:
+        hours = int(hours)
+    except Exception:
+        hours = 48
+    hours = max(1, min(hours, 168))
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    rows = _query(
+        "SELECT * FROM trades WHERE timestamp >= ? ORDER BY timestamp DESC",
+        (cutoff,),
+    )
+    return hours, cutoff, rows
+
+
 @app.get("/api/trades")
-async def api_trades():
-    """Recent trades + all-time PnL summary."""
-    rows = _query("SELECT * FROM trades ORDER BY id DESC LIMIT 1000")
-    pnl_row = _query("""
-        SELECT COALESCE(SUM(pnl), 0) as total_pnl
-        FROM trades WHERE dry_run = 0 AND pnl IS NOT NULL
-    """)
-    total_pnl = pnl_row[0]["total_pnl"] if pnl_row else 0.0
-    return {"ok": True, "trades": rows, "total_pnl": total_pnl}
+async def api_trades(hours: int = 48):
+    """Deprecated: use /api/trades/recent."""
+    hours, cutoff, rows = _recent_trades_window(hours)
+    return {
+        "ok": True,
+        "deprecated": True,
+        "message": "Use /api/trades/recent?hours=<n>.",
+        "hours": hours,
+        "cutoff": cutoff,
+        "trades": rows,
+    }
+
+
+@app.get("/api/trades/recent")
+async def api_recent_trades(hours: int = 48):
+    """Trades inside a trailing time window (default: last 48 hours)."""
+    hours, cutoff, rows = _recent_trades_window(hours)
+    return {"ok": True, "hours": hours, "cutoff": cutoff, "trades": rows}
 
 
 @app.get("/api/snapshots")
@@ -3493,13 +3516,28 @@ def _build_sse_payload() -> dict:
     # Positions
     positions = _query("SELECT * FROM positions WHERE status = 'open' ORDER BY opened_at DESC")
 
-    # Trades + total PnL
-    trades = _query("SELECT * FROM trades ORDER BY id DESC LIMIT 1000")
+    # PnL stats (all-time + current session)
     pnl_row = _query("""
         SELECT COALESCE(SUM(pnl), 0) as total_pnl
         FROM trades WHERE dry_run = 0 AND pnl IS NOT NULL
     """)
     total_pnl = pnl_row[0]["total_pnl"] if pnl_row else 0.0
+    session_pnl = 0.0
+    started_at_raw = str(status.get("started_at") or "").strip()
+    if started_at_raw:
+        try:
+            started_at = datetime.fromisoformat(started_at_raw.replace("Z", "+00:00"))
+            if started_at.tzinfo is None:
+                started_at = started_at.replace(tzinfo=timezone.utc)
+            started_at_utc = started_at.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            session_row = _query(
+                "SELECT COALESCE(SUM(pnl), 0) as session_pnl "
+                "FROM trades WHERE dry_run = 0 AND pnl IS NOT NULL AND timestamp >= ?",
+                (started_at_utc,),
+            )
+            session_pnl = session_row[0]["session_pnl"] if session_row else 0.0
+        except Exception:
+            session_pnl = 0.0
 
     # Log (last 1000 lines)
     log_lines = []
@@ -3540,8 +3578,8 @@ def _build_sse_payload() -> dict:
     return {
         "status": status,
         "positions": positions,
-        "trades": trades,
         "total_pnl": total_pnl,
+        "session_pnl": session_pnl,
         "log": log_lines,
         "log_path": str(log_path),
         "slugs": slugs,

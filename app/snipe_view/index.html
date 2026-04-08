@@ -13,11 +13,12 @@
     externally (protected by a simple PIN gate).
 
   DATA FLOW
-    - SSE stream:  GET /api/stream pushes a full payload every ~1.5s.
+    - SSE stream:  GET /api/stream pushes a full payload every ~2s.
                    Contains: status (running, paused, started_at, stats),
-                   positions, trades, total_pnl, log (last 1000 lines),
-                   slugs, visitors (active count + IPs), wallet_balance,
-                   wallet_symbol.
+                   positions, total_pnl, log (last 1000 lines), slugs,
+                   visitors (active count + IPs), wallet_balance, wallet_symbol.
+    - Trades feed: GET /api/trades/recent?hours=48 polled separately for the
+                   Recent Trades card (slower cadence than SSE status updates).
     - Auth:        PIN entered on first visit, stored as a signed cookie.
                    Backend validates via HMAC. No sessions, no tokens.
     - No controls: No pause/resume/kill/settings endpoints.
@@ -31,13 +32,15 @@
                         main dashboard: snipe=blue, warn=amber, redeem=teal).
       #positionsTable — Open positions (market, outcome, shares, avg price,
                         cost, edge, result).
-      #tradesTable    — Recent trades (last 50) with PnL display.
+      #tradesTable    — Recent trades (last 48h) with PnL display.
 
   JAVASCRIPT STRUCTURE
     $(id)             — Shorthand for getElementById.
     updateDashboard() — Main render function called on every SSE message.
                         Updates: badge, uptime, balance, visitor badge,
-                        positions table, trades table, log panel.
+                        positions table, log panel.
+    refreshRecentTrades()
+                     — Polls /api/trades/recent and renders trades table.
     connectSSE()      — Opens EventSource to /api/stream. Called after PIN
                         authentication succeeds. Auto-reconnects on failure.
     Clock             — ET + UTC + next-5m countdown, updated every 1s.
@@ -661,6 +664,10 @@
     let _sseConnected = false;
     let _lastBadgeText = '';
     let _lastBadgeClass = '';
+    const _RECENT_TRADES_HOURS = 48;
+    const _RECENT_TRADES_REFRESH_MS = 10000;
+    let _recentTradesPoll = null;
+    let _recentTradesFetchInFlight = false;
 
     function _updateBadgeSSE() {
       const badge = $('statusBadge');
@@ -689,6 +696,60 @@
     function assetBadge(asset) {
       const cls = 'asset-badge asset-' + (asset || '').toLowerCase();
       return `<span class="${cls}">${(asset || '?').toUpperCase()}</span>`;
+    }
+
+    function renderRecentTrades(trades) {
+      const rows = Array.isArray(trades) ? trades : [];
+      if (rows.length === 0) {
+        $('tradesTable').innerHTML = '<div class="empty">No trades in the last 48 hours</div>';
+        return;
+      }
+      let html = '<table><tr><th>Time</th><th>Market</th><th>Outcome</th><th>Shares</th><th>Price</th><th>Amount</th><th>Edge</th><th>Result</th></tr>';
+      for (const t of rows) {
+        const raw = t.timestamp || '';
+        const d = new Date(raw.endsWith('Z') ? raw : raw + 'Z');
+        const time = isNaN(d) ? raw.substring(11, 19) : d.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true });
+        const res = t.result || 'pending';
+        let resHtml;
+        if (res === 'won') resHtml = '<span style="color:var(--green);font-weight:600">âœ“ WON</span>';
+        else if (res === 'lost') resHtml = '<span style="color:var(--red);font-weight:600">âœ— LOST</span>';
+        else resHtml = '<span style="color:var(--dim)">pending</span>';
+        const pnlVal = t.pnl != null ? t.pnl : null;
+        const pnlStr = pnlVal != null ? (pnlVal >= 0 ? '+$' : '-$') + Math.abs(pnlVal).toFixed(2) : '';
+        const pnlColor = pnlVal != null ? (pnlVal >= 0 ? 'var(--green)' : 'var(--red)') : 'var(--dim)';
+        html += `<tr>
+        <td class="mono">${time}</td>
+        <td>${assetBadge(t.asset)} ${marketLink(t.event_title, 65, t.condition_id)}</td>
+        <td class="green">${t.outcome}</td>
+        <td class="mono">${(t.shares || 0).toFixed(2)}</td>
+        <td class="mono">$${(t.price || 0).toFixed(4)}</td>
+        <td class="mono">$${(t.amount || 0).toFixed(2)}</td>
+        <td class="mono green">$${(t.edge || 0).toFixed(4)}</td>
+        <td>${resHtml}${pnlStr ? ' <span class="mono" style="color:' + pnlColor + ';font-size:0.85em">' + pnlStr + '</span>' : ''}</td>
+      </tr>`;
+      }
+      html += '</table>';
+      $('tradesTable').innerHTML = html;
+    }
+
+    async function refreshRecentTrades() {
+      if (_recentTradesFetchInFlight) return;
+      _recentTradesFetchInFlight = true;
+      try {
+        const r = await fetch('/api/trades/recent?hours=' + _RECENT_TRADES_HOURS, { cache: 'no-store' });
+        const d = await r.json();
+        if (!r.ok || !d.ok) return;
+        renderRecentTrades(d.trades || []);
+      } catch (_) {
+      } finally {
+        _recentTradesFetchInFlight = false;
+      }
+    }
+
+    function startRecentTradesPolling() {
+      if (_recentTradesPoll) return;
+      refreshRecentTrades();
+      _recentTradesPoll = setInterval(refreshRecentTrades, _RECENT_TRADES_REFRESH_MS);
     }
 
     function escHtml(s) {
@@ -804,50 +865,7 @@
         $('positionsTable').innerHTML = html;
       } else {
         $('positionsTable').innerHTML = '<div class="empty">No open positions</div>';
-      }
-
-      // Trades
-      const allTrades = data.trades || [];
-      if (allTrades.length > 0) {
-        const cutoffMs = Date.now() - (48 * 60 * 60 * 1000);
-        const recentTrades = allTrades.filter(t => {
-          const raw = t.timestamp || '';
-          const ts = new Date(raw.endsWith('Z') ? raw : raw + 'Z').getTime();
-          return Number.isFinite(ts) && ts >= cutoffMs;
-        });
-        let html = '<table><tr><th>Time</th><th>Market</th><th>Outcome</th><th>Shares</th><th>Price</th><th>Amount</th><th>Edge</th><th>Result</th></tr>';
-        for (const t of recentTrades) {
-          const raw = t.timestamp || '';
-          const d = new Date(raw.endsWith('Z') ? raw : raw + 'Z');
-          const time = isNaN(d) ? raw.substring(11, 19) : d.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true });
-          const res = t.result || 'pending';
-          let resHtml;
-          if (res === 'won') resHtml = '<span style="color:var(--green);font-weight:600">✓ WON</span>';
-          else if (res === 'lost') resHtml = '<span style="color:var(--red);font-weight:600">✗ LOST</span>';
-          else resHtml = '<span style="color:var(--dim)">pending</span>';
-          const pnlVal = t.pnl != null ? t.pnl : null;
-          const pnlStr = pnlVal != null ? (pnlVal >= 0 ? '+$' : '-$') + Math.abs(pnlVal).toFixed(2) : '';
-          const pnlColor = pnlVal != null ? (pnlVal >= 0 ? 'var(--green)' : 'var(--red)') : 'var(--dim)';
-          html += `<tr>
-        <td class="mono">${time}</td>
-        <td>${assetBadge(t.asset)} ${marketLink(t.event_title, 65, t.condition_id)}</td>
-        <td class="green">${t.outcome}</td>
-        <td class="mono">${(t.shares || 0).toFixed(2)}</td>
-        <td class="mono">$${(t.price || 0).toFixed(4)}</td>
-        <td class="mono">$${(t.amount || 0).toFixed(2)}</td>
-        <td class="mono green">$${(t.edge || 0).toFixed(4)}</td>
-        <td>${resHtml}${pnlStr ? ' <span class="mono" style="color:' + pnlColor + ';font-size:0.85em">' + pnlStr + '</span>' : ''}</td>
-      </tr>`;
-        }
-        if (recentTrades.length > 0) {
-          html += '</table>';
-          $('tradesTable').innerHTML = html;
-        } else {
-          $('tradesTable').innerHTML = '<div class="empty">No trades in the last 48 hours</div>';
-        }
-      } else {
-        $('tradesTable').innerHTML = '<div class="empty">No trades yet</div>';
-      }
+      }
 
       // Log -- matches main dashboard rendering
       const logLines = data.log || [];
@@ -921,6 +939,7 @@
 
     // ── SSE (read-only stream) ──
     function connectSSE() {
+      startRecentTradesPolling();
       const es = new EventSource('/api/stream');
       es.onopen = () => { _sseConnected = true; _updateBadgeSSE(); };
       es.onmessage = (e) => {
@@ -936,3 +955,4 @@
 </body>
 
 </html>
+

@@ -4,10 +4,10 @@ Standalone viewer backend for PolySnipe. Serves snipe_view/index.html on port 89
 Zero POST routes, zero bot controls, zero config writes.
 
 Key responsibilities:
-  - SSE stream (/api/stream): Pushes full state every ~1.5s.
-    Payload: status (from shared _bot_state dict), positions, trades, total_pnl,
+  - SSE stream (/api/stream): Pushes full state every ~2s.
+    Payload: status (from shared _bot_state dict), positions, total_pnl,
     log (last 1000 lines), slugs, visitors (active count + IPs), wallet_balance,
-    wallet_symbol.
+    wallet_symbol. Recent trades are fetched separately via /api/trades/recent.
   - Wallet balance: Fetched via Etherscan v2 API (Polygon USDC.e), cached 30s.
   - Visitor tracking: Counts active SSE connections and exposes connected IPs.
   - PIN auth: Simple PIN gate via signed cookie (HMAC). No sessions, no tokens.
@@ -28,7 +28,7 @@ import sqlite3
 import threading
 import time
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import re
@@ -256,8 +256,7 @@ def _build_payload() -> dict:
     # Positions
     positions = _query("SELECT * FROM positions WHERE status = 'open' ORDER BY opened_at DESC")
 
-    # Trades + PnL
-    trades = _query("SELECT * FROM trades ORDER BY id DESC LIMIT 1000")
+    # PnL
     pnl_row = _query("""
         SELECT COALESCE(SUM(pnl), 0) as total_pnl
         FROM trades WHERE dry_run = 0 AND pnl IS NOT NULL
@@ -316,7 +315,6 @@ def _build_payload() -> dict:
     return {
         "status": dict(_bot_state) if _bot_state else {"running": False, "mode": "UNKNOWN"},
         "positions": positions,
-        "trades": trades,
         "total_pnl": total_pnl,
         "log": log_lines,
         "slugs": slugs,
@@ -325,6 +323,23 @@ def _build_payload() -> dict:
         "wallet_address": BALANCE_ADDRESS,
         "visitors": _get_viewer_count(),
     }
+
+
+@view_app.get("/api/trades/recent")
+async def api_recent_trades(request: Request, hours: int = 48):
+    """Trailing-window trades for the Recent Trades card."""
+    _verify_pin_cookie(request)
+    try:
+        hours = int(hours)
+    except Exception:
+        hours = 48
+    hours = max(1, min(hours, 168))
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    rows = _query(
+        "SELECT * FROM trades WHERE timestamp >= ? ORDER BY timestamp DESC",
+        (cutoff,),
+    )
+    return {"ok": True, "hours": hours, "cutoff": cutoff, "trades": rows}
 
 
 @view_app.get("/api/stream")
