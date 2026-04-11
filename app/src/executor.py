@@ -75,6 +75,44 @@ class Executor:
         except Exception:
             return 0.0
 
+    @staticmethod
+    def _is_service_not_ready_error(exc: Exception) -> bool:
+        """True when upstream CLOB is temporarily not ready (HTTP 425)."""
+        status_code = getattr(exc, "status_code", None)
+        if status_code == 425:
+            return True
+        api_msg = str(getattr(exc, "error_message", "") or "").lower()
+        err_msg = str(exc).lower()
+        return "service not ready" in api_msg or "service not ready" in err_msg
+
+    async def _submit_hft_buy_with_retry(
+        self,
+        *,
+        loop: asyncio.AbstractEventLoop,
+        token_id: str,
+        amount: float,
+        max_price: float,
+        mkt: str,
+        cid_short: str,
+    ) -> dict:
+        """Submit HFT market buy; retry once on transient 425 service-not-ready."""
+        try:
+            return await loop.run_in_executor(
+                self._clob_pool, self.api.place_market_buy, token_id, amount, max_price
+            )
+        except Exception as e:
+            if not self._is_service_not_ready_error(e):
+                raise
+            logger.warning(
+                "[HFT-RETRY] mkt=%s cid=%s reason=service_not_ready retry_in_ms=200",
+                mkt,
+                cid_short,
+            )
+            await asyncio.sleep(0.2)
+            return await loop.run_in_executor(
+                self._clob_pool, self.api.place_market_buy, token_id, amount, max_price
+            )
+
     @classmethod
     def _fill_from_trade_rows(cls, rows) -> tuple[float, float, float]:
         """Return (shares, avg_price, total_cost) from trade rows."""
@@ -519,10 +557,15 @@ class Executor:
                     mkt, cid_short, trigger_to_submit_ms,
                 )
 
-            # Fire buy immediately (no routing/GTC fallback roundtrip)
-            result = await loop.run_in_executor(
-                self._clob_pool, self.api.place_market_buy,
-                snipe_token, amount, max_price
+            # Fire buy immediately (no routing/GTC fallback roundtrip).
+            # Retry once only for transient "service not ready" (425).
+            result = await self._submit_hft_buy_with_retry(
+                loop=loop,
+                token_id=snipe_token,
+                amount=amount,
+                max_price=max_price,
+                mkt=mkt,
+                cid_short=cid_short,
             )
             ack_ts = time.perf_counter()
             submit_to_ack_ms = (ack_ts - submit_ts) * 1000.0

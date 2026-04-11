@@ -1146,7 +1146,7 @@ def _apply_hft_settings(body: dict) -> tuple[list[str], str | None]:
         t.hft_max_price_matrix = matrix
         updated.append("hft_max_price_matrix=updated")
     if "hft_barrier_delay" in body:
-        val = max(0, min(120, int(body["hft_barrier_delay"])))
+        val = max(0, int(body["hft_barrier_delay"]))
         t.hft_barrier_delay = val
         updated.append(f"hft_barrier_delay={val}")
     if "hft_armed_sniper_enabled" in body:

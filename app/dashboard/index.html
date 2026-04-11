@@ -1244,7 +1244,7 @@
             <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;">
               <label class="tip" data-tip="Seconds after market start before HFT can trigger">Start Delay (s)</label>
               <div style="display:flex;align-items:center;gap:4px;">
-                <input type="number" id="setHft2Delay" step="1" min="0" max="120" class="ctrl-input"
+                <input type="number" id="setHft2Delay" step="1" min="0" class="ctrl-input"
                   style="width:55px;text-align:right;">
               </div>
             </div>
@@ -3011,7 +3011,7 @@
       if (isNaN(barrier) || barrier < 0) { showToast('Invalid Barrier %', true); return; }
       if (isNaN(barrier15m) || barrier15m < 0) { showToast('Invalid Barrier 15m %', true); return; }
       if (isNaN(barrier1h) || barrier1h < 0) { showToast('Invalid Barrier 1h %', true); return; }
-      if (isNaN(barrierDelay) || barrierDelay < 0 || barrierDelay > 120) { showToast('Invalid Start Delay', true); return; }
+      if (isNaN(barrierDelay) || barrierDelay < 0) { showToast('Invalid Start Delay', true); return; }
 
       try {
         const res = await fetch('/api/hft/settings', {

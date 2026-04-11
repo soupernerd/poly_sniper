@@ -372,7 +372,7 @@ class MonitorDB:
             except Exception as e:
                 logger.debug("[MONITOR DB] sweep error for %s: %s", cid[:16], e)
         if filled:
-            logger.info("[MONITOR DB] Backfilled winners for %d markets", filled)
+            logger.info("[MONITOR DB] Reconciled winners for %d markets", filled)
 
     # -- Monitor V2 (independent research pipeline) --
 
@@ -656,7 +656,7 @@ class MonitorDB:
                 logger.debug("[MONITOR V2] winner sweep error for %s: %s", cid[:16], e)
         if filled:
             await self._db.commit()
-            logger.info("[MONITOR V2] Backfilled winners for %d markets", filled)
+            logger.info("[MONITOR V2] Reconciled winners for %d markets", filled)
 
     async def wipe_v2(self) -> int:
         """Delete monitor_v2 data. Returns rows removed from samples."""
