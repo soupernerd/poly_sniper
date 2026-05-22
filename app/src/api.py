@@ -47,7 +47,7 @@ _TIMEOUT = aiohttp.ClientTimeout(total=15)
 # -- On-chain constants --
 POLYGON_RPC = "https://polygon-bor-rpc.publicnode.com"
 CTF_CONTRACT = Web3.to_checksum_address("0x4D97DCd97eC945f40cF65F87097ACe5EA0476045")
-PUSD = Web3.to_checksum_address("0x23d4FD68783F0c2829D1ED2Be93e6Cc3eDf81c67")
+PUSD = Web3.to_checksum_address("0xc011a7e12a19f7b1f670d46f03b03f3342e82dfb")
 NEGRISK_ADAPTER = Web3.to_checksum_address("0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296")
 CTF_EXCHANGE = Web3.to_checksum_address("0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E")
 NEGRISK_CTF_EXCHANGE = Web3.to_checksum_address("0xC5d563A36AE78145C45a50134d48A1215220f80a")

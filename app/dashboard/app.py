@@ -257,7 +257,7 @@ def _active_log_path() -> Path:
 # -- Wallet balance (read-only, cached) --
 ETHERSCAN_API_KEY = str(os.getenv("POLYGONSCAN_API_KEY", "") or "").strip()
 BALANCE_ADDRESS = str(os.getenv("POLYMARKET_WALLET_ADDRESS", "") or "").strip()
-PUSD_TOKEN_ADDRESS = "0x23d4FD68783F0c2829D1ED2Be93e6Cc3eDf81c67"
+PUSD_TOKEN_ADDRESS = "0xc011a7e12a19f7b1f670d46f03b03f3342e82dfb"
 POLYGON_CHAIN_ID = 137
 _rpc_env_raw = str(os.getenv("POLYGON_RPC_URL", "") or "").strip()
 if _rpc_env_raw:
