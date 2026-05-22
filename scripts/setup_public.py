@@ -99,14 +99,19 @@ def _is_missing(value: str) -> bool:
     return False
 
 
-def _generate_wallet_and_api(*, private_key: str = "", wallet_address: str = "") -> dict[str, str]:
+def _generate_wallet_and_api(
+    *,
+    private_key: str = "",
+    wallet_address: str = "",
+    signature_type: int = CLOB_SIGNATURE_TYPE,
+) -> dict[str, str]:
     py = str(_venv_python())
     env = os.environ.copy()
     env["PS_PRIVATE_KEY"] = private_key or ""
     env["PS_WALLET"] = wallet_address or ""
     env["PS_CLOB_URL"] = CLOB_URL
     env["PS_CHAIN_ID"] = str(CLOB_CHAIN_ID)
-    env["PS_SIGNATURE_TYPE"] = str(CLOB_SIGNATURE_TYPE)
+    env["PS_SIGNATURE_TYPE"] = str(int(signature_type))
 
     helper = textwrap.dedent(
         """
@@ -183,7 +188,20 @@ def _install_requirements() -> None:
     _run([py, "-m", "pip", "install", "-r", str(REQ_FILE)], cwd=APP_DIR)
 
 
-def _ensure_env(*, rotate_credentials: bool = False, overwrite_env: bool = False) -> dict[str, str]:
+def _parse_int(value: str, default: int) -> int:
+    try:
+        return int(str(value).strip())
+    except Exception:
+        return default
+
+
+def _ensure_env(
+    *,
+    rotate_credentials: bool = False,
+    overwrite_env: bool = False,
+    signature_type: int | None = None,
+    funder_address: str = "",
+) -> dict[str, str]:
     if not ENV_EXAMPLE.exists():
         raise FileNotFoundError(f"Missing template: {ENV_EXAMPLE}")
 
@@ -206,9 +224,46 @@ def _ensure_env(*, rotate_credentials: bool = False, overwrite_env: bool = False
         need_wallet = True
         need_api = True
 
+    resolved_signature_type = (
+        int(signature_type)
+        if signature_type is not None
+        else _parse_int(values.get("POLYMARKET_SIGNATURE_TYPE", ""), CLOB_SIGNATURE_TYPE)
+    )
+    if resolved_signature_type not in (0, 1, 2, 3):
+        raise RuntimeError(
+            f"Unsupported signature type: {resolved_signature_type}. Use one of: 0,1,2,3."
+        )
+
+    if signature_type is not None:
+        values["POLYMARKET_SIGNATURE_TYPE"] = str(resolved_signature_type)
+
+    if funder_address.strip():
+        values["POLYMARKET_WALLET_ADDRESS"] = funder_address.strip()
+        need_wallet = False
+
     if need_private or need_wallet or need_api:
+        existing_private = values.get("POLYMARKET_PRIVATE_KEY", "").strip()
+        existing_wallet = values.get("POLYMARKET_WALLET_ADDRESS", "").strip()
+
+        # Non-EOA modes require explicit funder address.
+        if (
+            resolved_signature_type in (1, 2, 3)
+            and not rotate_credentials
+            and _is_missing(existing_wallet)
+        ):
+            raise RuntimeError(
+                "POLYMARKET_WALLET_ADDRESS is required for signature_type "
+                f"{resolved_signature_type} (funder/proxy/deposit wallet)."
+            )
+
         print("[setup] Auto-generating wallet + Polymarket API credentials")
-        generated = _generate_wallet_and_api(private_key="", wallet_address="")
+        seed_private = "" if (rotate_credentials or need_private) else existing_private
+        seed_wallet = "" if (rotate_credentials or need_wallet) else existing_wallet
+        generated = _generate_wallet_and_api(
+            private_key=seed_private,
+            wallet_address=seed_wallet,
+            signature_type=resolved_signature_type,
+        )
         values["POLYMARKET_PRIVATE_KEY"] = generated["private_key"]
         values["POLYMARKET_WALLET_ADDRESS"] = generated["wallet_address"]
         values["POLYMARKET_API_KEY"] = generated["api_key"]
@@ -288,6 +343,25 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Overwrite app/.env from app/.env.example before writing credentials.",
     )
+    parser.add_argument(
+        "--signature-type",
+        type=int,
+        choices=[0, 1, 2, 3],
+        default=None,
+        help=(
+            "Wallet signature type for API credential derivation "
+            "(0=EOA, 1=POLY_PROXY, 2=GNOSIS_SAFE, 3=POLY_1271). "
+            "If omitted, uses POLYMARKET_SIGNATURE_TYPE from app/.env or defaults to 0."
+        ),
+    )
+    parser.add_argument(
+        "--funder-address",
+        default="",
+        help=(
+            "Optional wallet funder/proxy/deposit address override. "
+            "Useful for signature types 1/2/3."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -330,8 +404,15 @@ def main(argv: list[str] | None = None) -> int:
         env_values = _ensure_env(
             rotate_credentials=args.rotate_credentials,
             overwrite_env=args.overwrite_env,
+            signature_type=args.signature_type,
+            funder_address=args.funder_address,
         )
         _print_next_steps(env_values)
+        if args.signature_type is not None and int(args.signature_type) != 0:
+            print(
+                "[info] Non-EOA mode selected. Ensure app/config.yaml has "
+                f"api.signature_type: {int(args.signature_type)}."
+            )
         if not args.no_restart:
             if _request_runtime_restart():
                 print("[ok] Running runtime detected. Restart requested to load new credentials.")

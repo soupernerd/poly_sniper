@@ -47,6 +47,7 @@ Important:
   - macOS/Linux: `python3 scripts/setup_public.py`
 - If Step 1 is already complete and you click **Generate Wallet + API Keys** again, the dashboard asks for confirmation, then overwrites `app/.env` and rotates wallet/API credentials.
 - This repo defaults to EOA wallet mode (`api.signature_type: 0`). If you migrate to deposit-wallet flow, update `api.signature_type` to `3` and set `POLYMARKET_WALLET_ADDRESS` to the deposit wallet funder.
+- `scripts/setup_public.py` preserves existing `POLYMARKET_PRIVATE_KEY` and `POLYMARKET_WALLET_ADDRESS` when re-deriving missing API creds. It will not rotate wallet keys unless you pass `--rotate-credentials`.
 
 ## Manual Setup (Advanced)
 
@@ -59,6 +60,7 @@ Important:
 3. Generate `.env` + credentials:
    - `python scripts/setup_public.py --no-venv --no-pip`
    - Rotate to a brand-new wallet + API set (overwrite env): `python scripts/setup_public.py --no-venv --no-pip --overwrite-env --rotate-credentials`
+   - Deposit-wallet/proxy bootstrap example (no key rotation): `python scripts/setup_public.py --no-venv --no-pip --signature-type 3 --funder-address 0xYourDepositWallet`
    - If runtime is already live on `127.0.0.1:8898`, setup auto-requests a restart.
 4. Start bot:
    - Windows: `start-hft.bat`
