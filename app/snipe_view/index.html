@@ -42,6 +42,7 @@
     refreshRecentTrades()
                      — Polls /api/trades/recent and renders trades table.
     connectSSE()      — Opens EventSource to /api/stream. Called after PIN
+    connectSSE()      — Opens EventSource to /api/stream. Called after PIN
                         authentication succeeds. Auto-reconnects on failure.
     Clock             — ET + UTC + next-5m countdown, updated every 1s.
     escHtml()         — Sanitizes log lines for safe innerHTML rendering.
@@ -50,7 +51,7 @@
 
   WALLET BALANCE
     Fetched server-side in snipe_view/app.py via Etherscan v2 API (Polygon
-    USDC.e token balance), cached 30s (_get_cached_balance). Sent in SSE
+    pUSD token balance), cached 30s (_get_cached_balance). Sent in SSE
     as wallet_balance/wallet_symbol. Rendered in header as green text.
 
   KEY DIFFERENCES FROM MAIN DASHBOARD (dashboard/index.html)
@@ -711,8 +712,8 @@
         const time = isNaN(d) ? raw.substring(11, 19) : d.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true });
         const res = t.result || 'pending';
         let resHtml;
-        if (res === 'won') resHtml = '<span style="color:var(--green);font-weight:600">âœ“ WON</span>';
-        else if (res === 'lost') resHtml = '<span style="color:var(--red);font-weight:600">âœ— LOST</span>';
+        if (res === 'won') resHtml = '<span style="color:var(--green);font-weight:600">✓ WON</span>';
+        else if (res === 'lost') resHtml = '<span style="color:var(--red);font-weight:600">✗ LOST</span>';
         else resHtml = '<span style="color:var(--dim)">pending</span>';
         const pnlVal = t.pnl != null ? t.pnl : null;
         const pnlStr = pnlVal != null ? (pnlVal >= 0 ? '+$' : '-$') + Math.abs(pnlVal).toFixed(2) : '';
@@ -785,7 +786,7 @@
       _startedAt = st.started_at;
       $('uptime').textContent = formatUptime();
       if (data.wallet_balance != null) {
-        const sym = data.wallet_symbol || 'USDC.e';
+        const sym = data.wallet_symbol || 'pUSD';
         $('walletBalance').textContent = sym + ' ' + Number(data.wallet_balance || 0).toFixed(2);
       }
 

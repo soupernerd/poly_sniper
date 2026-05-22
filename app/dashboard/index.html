@@ -1300,7 +1300,7 @@
         <div class="funding-card">
           <div class="funding-title">Wallet Needs Funding</div>
           <div class="funding-text" id="fundingPromptText">
-            Fund your wallet with Polygon USDC.e and a small POL gas balance before live entries.
+            Fund your wallet with Polygon pUSD and a small POL gas balance before live entries.
           </div>
           <div class="funding-steps">
             <div class="funding-step">
@@ -1321,7 +1321,7 @@
               </div>
               <span class="funding-step-state pending" id="fundStepFundState">Pending</span>
             </div>
-            <div class="funding-step-note" id="fundStepFundNote">Deposit USDC.e for trading and POL for gas.</div>
+            <div class="funding-step-note" id="fundStepFundNote">Deposit pUSD for trading and POL for gas.</div>
             <div class="funding-step-actions">
               <a class="funding-link" id="useSideshiftBtn" href="https://sideshift.ai/a/trade" target="_blank" rel="noopener">Use SideShift (Recommended)</a>
               <a class="funding-link" id="installPhantomBtn" href="https://phantom.com/download" target="_blank" rel="noopener">Install Phantom Wallet (Optional)</a>
@@ -1338,7 +1338,7 @@
             <code id="fundingPrivateKey">--</code>
           </div>
           <div class="funding-subtext">
-            Required assets: USDC.e (trading) + POL (gas).
+            Required assets: pUSD (trading) + POL (gas).
           </div>
         </div>
       </div>
@@ -2222,13 +2222,13 @@
         if (stepFundNote) stepFundNote.textContent = 'Finish Step 1 first.';
       } else if (usdcReady && polReady) {
         setFundingStepState('fundStepFundState', 'Complete', 'complete');
-        if (stepFundNote) stepFundNote.textContent = 'USDC.e and POL detected.';
+        if (stepFundNote) stepFundNote.textContent = 'pUSD and POL detected.';
       } else if (usdcEmpty && polEmpty) {
         setFundingStepState('fundStepFundState', 'Need Both', 'needs');
-        if (stepFundNote) stepFundNote.textContent = 'Deposit both USDC.e and POL on Polygon.';
+        if (stepFundNote) stepFundNote.textContent = 'Deposit both pUSD and POL on Polygon.';
       } else if (usdcEmpty) {
-        setFundingStepState('fundStepFundState', 'Need USDC.e', 'needs');
-        if (stepFundNote) stepFundNote.textContent = 'Deposit Polygon USDC.e to enable trading.';
+        setFundingStepState('fundStepFundState', 'Need pUSD', 'needs');
+        if (stepFundNote) stepFundNote.textContent = 'Deposit Polygon pUSD to enable trading.';
       } else if (polEmpty) {
         setFundingStepState('fundStepFundState', 'Need POL', 'needs');
         if (stepFundNote) stepFundNote.textContent = 'Add a small POL balance for gas.';
@@ -2257,9 +2257,9 @@
 
       if (promptText) {
         if (usdcEmpty && polEmpty) {
-          promptText.textContent = 'Wallet is empty. Fund Polygon USDC.e and a small POL gas balance.';
+          promptText.textContent = 'Wallet is empty. Fund Polygon pUSD and a small POL gas balance.';
         } else if (usdcEmpty) {
-          promptText.textContent = 'USDC.e is empty. Fund this wallet with Polygon USDC.e to trade.';
+          promptText.textContent = 'pUSD is empty. Fund this wallet with Polygon pUSD to trade.';
         } else if (polEmpty) {
           promptText.textContent = 'POL gas is empty. Add a small POL balance so transactions can execute.';
         } else {
@@ -2282,7 +2282,7 @@
 
       // Wallet balance
       if (data.wallet_balance != null) {
-        const sym = data.wallet_symbol || 'USDC.e';
+        const sym = data.wallet_symbol || 'pUSD';
         $('walletBalance').textContent = sym + ' ' + Number(data.wallet_balance).toFixed(2);
       }
       if (data.log_path) {
