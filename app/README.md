@@ -33,7 +33,7 @@ Important:
 ## Funding Reminder
 
 Use your `POLYMARKET_WALLET_ADDRESS` from `.env` and fund on Polygon with:
-- USDC.e
+- pUSD (Polymarket USD)
 - small POL gas balance
 
 Recommended bridge/swap:

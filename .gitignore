@@ -1,43 +1,43 @@
-.dev/
-.env
-.env.*
-*/.env
-!.env.example
-!*/.env.example
-.bak/
-.venv/
-app/.venv/
-.bak/.venv/
-.vscode/
-.node_modules/
-.npm_cache/
-.yarn_cache/
-.pnpm_cache/
-.bun_cache/
-.cache/
-marge-simpson/
-marge-prompts/
-wallets/
-copy_trade_ref/
-start-tunnel.bat
-stop-tunnel.bat
-
-# Python
+```
+# Compiled and build artifacts
+*.pyc
 __pycache__/
-*.py[cod]
-*$py.class
-*.egg-info/
+*.o
+*.obj
+dist/
+build/
+*.out
 
-# Database
-data/
-app/data/
-*.db
-*.db-journal
-*.db-shm
-*.db-wal
-*.lock
+# Dependencies
+.venv/
+venv/
+node_modules/
+.mypy_cache/
+.pytest_cache/
+target/
+.gradle/
 
-# Logs
-logs/
-app/logs/
+# Logs and temp files
 *.log
+*.tmp
+*.swp
+*.swo
+
+# Environment
+.env
+.env.local
+*.env.*
+
+# Editors
+.vscode/
+.idea/
+
+# Coverage
+coverage/
+htmlcov/
+.coverage
+
+# System files
+.DS_Store
+Thumbs.db
+```

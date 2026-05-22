@@ -35,7 +35,7 @@ If dashboard is already running and wallet is not initialized/funded:
 3. In **STEP 1**, click **Generate Wallet + API Keys** to create wallet + Polymarket API credentials
 4. When setup finishes, click **Restart Now** in the restart prompt so credentials are loaded
 5. In **STEP 2**, fund the wallet on Polygon with:
-   - **USDC.e** (trading balance)
+   - **pUSD** (Polymarket USD, trading balance)
    - **POL** (gas)
 6. Use **Copy Wallet** to copy the deposit address
 7. Optional: click **Install Phantom Wallet**, then use **Copy Private Key** to import and track that wallet in Phantom
@@ -66,7 +66,7 @@ Important:
 ## Funding Requirements
 
 Fund your `POLYMARKET_WALLET_ADDRESS` (in `app/.env`) on **Polygon (PoS)** with:
-- **USDC.e** (trading balance)
+- **pUSD** (Polymarket USD, trading balance)
 - **POL** (gas)
 
 Recommended (KYC-free): `https://sideshift.ai/a/trade`

@@ -6,7 +6,7 @@ This document captures the public-release hardening plan and what was implemente
 
 1. Do not publish secrets (`app/.env`, `.bak/.env`, API keys, private wallet defaults).
 2. Make setup one-command for non-technical users.
-3. Provide clear funding instructions (Polygon USDC.e + POL gas).
+3. Provide clear funding instructions (Polygon pUSD + POL gas).
 4. Keep local private runtime files intact for ongoing private usage.
 5. Keep `.bak/` legacy runtime in repo, but remove dead temp artifacts inside it.
 

@@ -237,11 +237,11 @@ def _print_next_steps(values: dict[str, str]) -> None:
         Next steps:
         1) Fund your Polygon wallet:
            - Wallet address: {wallet}
-           - Required assets: USDC.e (Polygon/PoS) + a small amount of POL for gas.
+           - Required assets: pUSD (Polygon/PoS) + a small amount of POL for gas.
 
         2) Recommended bridge/swap (KYC-free):
            - https://sideshift.ai/a/trade
-           - Swap from other chains/assets into Polygon USDC.e.
+           - Swap from other chains/assets into Polygon pUSD.
 
         3) If exchange/network routing blocks requests, use a VPN exit in:
            - Toronto, or
