@@ -46,6 +46,7 @@ Important:
   - Windows: `setup-public.bat`
   - macOS/Linux: `python3 scripts/setup_public.py`
 - If Step 1 is already complete and you click **Generate Wallet + API Keys** again, the dashboard asks for confirmation, then overwrites `app/.env` and rotates wallet/API credentials.
+- This repo defaults to EOA wallet mode (`api.signature_type: 0`). If you migrate to deposit-wallet flow, update `api.signature_type` to `3` and set `POLYMARKET_WALLET_ADDRESS` to the deposit wallet funder.
 
 ## Manual Setup (Advanced)
 
@@ -68,6 +69,12 @@ Important:
 Fund your `POLYMARKET_WALLET_ADDRESS` (in `app/.env`) on **Polygon (PoS)** with:
 - **pUSD** (Polymarket USD, trading balance)
 - **POL** (gas)
+
+On first startup with a fresh wallet, the bot now auto-submits required approval transactions for CLOB V2 trading:
+- pUSD approvals to `CTF Exchange` and `Neg Risk CTF Exchange`
+- ERC-1155 `setApprovalForAll` for `CTF Exchange`, `Neg Risk CTF Exchange`, and `Neg Risk Adapter`
+
+Keep enough **POL** in the wallet for these approval transactions.
 
 Recommended (KYC-free): `https://sideshift.ai/a/trade`
 

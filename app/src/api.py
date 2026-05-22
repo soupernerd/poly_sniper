@@ -1,6 +1,6 @@
 """Polymarket API client -- focused on sniper operations.
 
-Uses py-clob-client + aiohttp. Wallet credentials loaded from .env.
+Uses py-clob-client-v2 + aiohttp. Wallet credentials loaded from .env.
 """
 
 import asyncio
@@ -8,12 +8,11 @@ import logging
 from typing import Optional
 
 import aiohttp
-from py_clob_client.client import ClobClient
-from py_clob_client.clob_types import (
+from py_clob_client_v2 import ClobClient
+from py_clob_client_v2 import (
     ApiCreds, AssetType, BalanceAllowanceParams,
-    MarketOrderArgs, OrderArgs, OrderType, TradeParams,
+    MarketOrderArgs, OrderArgs, OrderPayload, OrderType, Side, TradeParams,
 )
-from py_clob_client.order_builder.constants import BUY, SELL
 from web3 import Web3
 from web3.middleware import ExtraDataToPOAMiddleware
 
@@ -21,15 +20,15 @@ from src.config import Config
 
 logger = logging.getLogger(__name__)
 
-# -- Patch py-clob-client UA --
-from py_clob_client.http_helpers import helpers as _clob_helpers
+# -- Patch py-clob-client-v2 UA --
+from py_clob_client_v2.http_helpers import helpers as _clob_helpers
 
 _BROWSER_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/131.0.0.0 Safari/537.36"
 )
-_orig_overload = _clob_helpers.overloadHeaders
+_orig_overload = _clob_helpers._overload_headers
 
 
 def _patched_overload(method: str, headers: dict) -> dict:
@@ -40,7 +39,7 @@ def _patched_overload(method: str, headers: dict) -> dict:
     return headers
 
 
-_clob_helpers.overloadHeaders = _patched_overload
+_clob_helpers._overload_headers = _patched_overload
 
 _TIMEOUT = aiohttp.ClientTimeout(total=15)
 
@@ -49,11 +48,12 @@ POLYGON_RPC = "https://polygon-bor-rpc.publicnode.com"
 CTF_CONTRACT = Web3.to_checksum_address("0x4D97DCd97eC945f40cF65F87097ACe5EA0476045")
 PUSD = Web3.to_checksum_address("0xc011a7e12a19f7b1f670d46f03b03f3342e82dfb")
 NEGRISK_ADAPTER = Web3.to_checksum_address("0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296")
-CTF_EXCHANGE = Web3.to_checksum_address("0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E")
-NEGRISK_CTF_EXCHANGE = Web3.to_checksum_address("0xC5d563A36AE78145C45a50134d48A1215220f80a")
+CTF_EXCHANGE = Web3.to_checksum_address("0xE111180000d2663C0091e4f400237545B87B996B")
+NEGRISK_CTF_EXCHANGE = Web3.to_checksum_address("0xe2222d279d744050d28e00520010520000310F59")
 
 # ERC-20 Transfer(address indexed from, address indexed to, uint256 value)
 _ERC20_TRANSFER_TOPIC = Web3.keccak(text="Transfer(address,address,uint256)")
+_MAX_UINT256 = (1 << 256) - 1
 
 _CTF_ABI = [
     {
@@ -89,6 +89,25 @@ _CTF_ABI = [
             {"name": "id", "type": "uint256"},
         ],
         "outputs": [{"name": "", "type": "uint256"}],
+    },
+]
+
+_ERC20_ABI = [
+    {
+        "name": "allowance", "type": "function", "stateMutability": "view",
+        "inputs": [
+            {"name": "owner", "type": "address"},
+            {"name": "spender", "type": "address"},
+        ],
+        "outputs": [{"name": "", "type": "uint256"}],
+    },
+    {
+        "name": "approve", "type": "function", "stateMutability": "nonpayable",
+        "inputs": [
+            {"name": "spender", "type": "address"},
+            {"name": "value", "type": "uint256"},
+        ],
+        "outputs": [{"name": "", "type": "bool"}],
     },
 ]
 
@@ -146,13 +165,27 @@ class PolymarketAPI:
                     api_secret=self.config.api_secret,
                     api_passphrase=self.config.api_passphrase,
                 ))
-            try:
-                self._clob_client.update_balance_allowance(
-                    BalanceAllowanceParams(asset_type=AssetType.COLLATERAL)
-                )
-                logger.info("CLOB collateral allowance set")
-            except Exception as e:
-                logger.warning("CLOB allowance failed (non-fatal): %s", e)
+            else:
+                # Self-heal when .env has wallet key but missing API creds.
+                try:
+                    derived = self._clob_client.create_or_derive_api_key()
+                    self._clob_client.set_api_creds(derived)
+                    logger.warning(
+                        "API creds missing from env; derived temporary creds for this session only. "
+                        "Run setup again to persist."
+                    )
+                except Exception as e:
+                    logger.warning("API key derive failed (orders may fail): %s", e)
+
+            # Ensure on-chain approvals needed for CLOB trading are present.
+            for _attempt in range(3):
+                try:
+                    self._ensure_collateral_approval()
+                    break
+                except Exception as e:
+                    logger.warning("Collateral approval attempt %d/3: %s", _attempt + 1, e)
+                    if _attempt < 2:
+                        await asyncio.sleep(2 ** _attempt)
 
             # ERC-1155 approval for exchange operators
             for _attempt in range(3):
@@ -163,6 +196,15 @@ class PolymarketAPI:
                     logger.warning("Conditional approval attempt %d/3: %s", _attempt + 1, e)
                     if _attempt < 2:
                         await asyncio.sleep(2 ** _attempt)
+
+            # Refresh backend allowance/balance cache after funding/approval changes.
+            try:
+                self._clob_client.update_balance_allowance(
+                    BalanceAllowanceParams(asset_type=AssetType.COLLATERAL)
+                )
+                logger.info("CLOB collateral balance/allowance cache refreshed")
+            except Exception as e:
+                logger.warning("CLOB balance/allowance cache refresh failed (non-fatal): %s", e)
 
             logger.info("API initialized (wallet: %s...)", self.config.wallet_address[:10])
         else:
@@ -420,16 +462,18 @@ class PolymarketAPI:
         if not self._clob_client:
             raise RuntimeError("CLOB client not initialized -- no private key")
         # Pre-round to 2 dp: the CLOB server enforces maker ≤ 2 decimals
-        # for FOK orders, and py-clob-client may not round sufficiently
+        # for FOK orders, and py-clob-client-v2 may not round sufficiently
         # for tokens with tick_size < 0.01.
         import math
         amount = math.floor(amount * 100) / 100
+        user_usdc_balance = self.get_balance()
         order = MarketOrderArgs(
             token_id=token_id,
             amount=amount,
-            side=BUY,
+            side=Side.BUY,
             order_type=OrderType.FOK,
             price=max_price,
+            user_usdc_balance=user_usdc_balance if user_usdc_balance > 0 else 0,
         )
         signed = self._clob_client.create_market_order(order)
         result = self._clob_client.post_order(signed, OrderType.FOK)
@@ -452,11 +496,13 @@ class PolymarketAPI:
             raise RuntimeError("CLOB client not initialized -- no private key")
         import math
         size = math.ceil(amount / price * 100) / 100  # Round UP to ensure total >= $1 CLOB min
+        user_usdc_balance = self.get_balance()
         order = OrderArgs(
             token_id=token_id,
             price=price,
             size=size,
-            side=BUY,
+            side=Side.BUY,
+            user_usdc_balance=user_usdc_balance if user_usdc_balance > 0 else None,
         )
         signed = self._clob_client.create_order(order)
         result = self._clob_client.post_order(signed, OrderType.GTC)
@@ -483,7 +529,7 @@ class PolymarketAPI:
             token_id=token_id,
             price=price,
             size=size,
-            side=SELL,
+            side=Side.SELL,
         )
         signed = self._clob_client.create_order(order)
         result = self._clob_client.post_order(signed, OrderType.GTC)
@@ -501,7 +547,7 @@ class PolymarketAPI:
             token_id=token_id,
             price=price,
             size=size,
-            side=SELL,
+            side=Side.SELL,
         )
         signed = self._clob_client.create_order(order)
         result = self._clob_client.post_order(signed, OrderType.FOK)
@@ -514,7 +560,7 @@ class PolymarketAPI:
         if not self._clob_client:
             return False
         try:
-            self._clob_client.cancel(order_id)
+            self._clob_client.cancel_order(OrderPayload(orderID=order_id))
             return True
         except Exception as e:
             logger.debug("cancel_order(%s) failed: %s", order_id[:16], e)
@@ -632,6 +678,29 @@ class PolymarketAPI:
             if receipt["status"] != 1:
                 raise RuntimeError(f"setApprovalForAll reverted for {label}")
             logger.info("ERC-1155 approval set for %s | tx: %s", label, tx_hash.hex())
+
+    def _ensure_collateral_approval(self) -> None:
+        """Set pUSD ERC-20 approvals for exchange contracts used by CLOB trading."""
+        w3, acct, _ctf = self._web3_ctf()
+        pusd = w3.eth.contract(address=PUSD, abi=_ERC20_ABI)
+        for label, spender in [
+            ("CTF Exchange", CTF_EXCHANGE),
+            ("NegRisk CTF Exchange", NEGRISK_CTF_EXCHANGE),
+        ]:
+            allowance = int(pusd.functions.allowance(acct.address, spender).call() or 0)
+            if allowance >= (_MAX_UINT256 // 2):
+                continue
+            tx = pusd.functions.approve(spender, _MAX_UINT256).build_transaction({
+                "from": acct.address,
+                "nonce": w3.eth.get_transaction_count(acct.address),
+                "gas": 100_000, "gasPrice": w3.eth.gas_price, "chainId": 137,
+            })
+            signed = acct.sign_transaction(tx)
+            tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
+            receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=60)
+            if receipt["status"] != 1:
+                raise RuntimeError(f"approve reverted for {label}")
+            logger.info("pUSD approval set for %s | tx: %s", label, tx_hash.hex())
 
     @staticmethod
     def _parse_usdc_payout(receipt, wallet_address: str) -> float:

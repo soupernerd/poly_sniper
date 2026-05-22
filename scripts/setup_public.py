@@ -113,7 +113,7 @@ def _generate_wallet_and_api(*, private_key: str = "", wallet_address: str = "")
         import json
         import os
         from eth_account import Account
-        from py_clob_client.client import ClobClient
+        from py_clob_client_v2 import ClobClient
 
         private_key = (os.getenv("PS_PRIVATE_KEY", "") or "").strip()
         wallet = (os.getenv("PS_WALLET", "") or "").strip()
@@ -137,7 +137,7 @@ def _generate_wallet_and_api(*, private_key: str = "", wallet_address: str = "")
             signature_type=signature_type,
             funder=wallet,
         )
-        creds = client.create_or_derive_api_creds()
+        creds = client.create_or_derive_api_key()
         print(json.dumps({
             "private_key": private_key,
             "wallet_address": wallet,
