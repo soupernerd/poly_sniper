@@ -495,13 +495,14 @@ class Database:
                 # 1. Close position
                 await self._conn.execute(
                     """UPDATE positions SET status = ?, closed_at = ?, pnl = ?,
+                           result = ?,
                            pnl_finalized = 0,
                            pnl_finalized_at = NULL,
                            pnl_finalizer_state = NULL,
                            redeem_tx_hash = COALESCE(?, redeem_tx_hash),
                            payout_usdc = COALESCE(?, payout_usdc)
                        WHERE condition_id = ? AND status = 'open'""",
-                    (status, now, pnl, redeem_tx_hash, payout_usdc, condition_id),
+                    (status, now, pnl, "won" if won else "lost", redeem_tx_hash, payout_usdc, condition_id),
                 )
                 changed_cur = await self._conn.execute("SELECT changes() AS n")
                 changed_row = await changed_cur.fetchone()
@@ -675,7 +676,13 @@ class Database:
                 offload_raw = pos["offload_revenue"]
                 offload = float(offload_raw or 0.0)
 
-                if result not in {"won", "lost"}:
+                effective_result = result
+                # Defensive consistency rule:
+                # closed-as-lost rows must finalize as losses even if an earlier
+                # "instant resolution" marker left result="won".
+                if status == "lost":
+                    effective_result = "lost"
+                if effective_result not in {"won", "lost"}:
                     await self._conn.execute(
                         """UPDATE positions
                            SET pnl_finalized = 1,
@@ -688,7 +695,7 @@ class Database:
                     continue
 
                 state = "ok"
-                if result == "won":
+                if effective_result == "won":
                     missing_cashflow = (
                         offload_raw is None
                         and fill_cost > 0
@@ -709,12 +716,13 @@ class Database:
 
                 await self._conn.execute(
                     """UPDATE positions
-                       SET pnl = ?,
+                       SET result = ?,
+                           pnl = ?,
                            pnl_finalized = 1,
                            pnl_finalized_at = ?,
                            pnl_finalizer_state = ?
                        WHERE id = ?""",
-                    (final_pnl, now, state, pos_id),
+                    (effective_result, final_pnl, now, state, pos_id),
                 )
 
                 trades_cur = await self._conn.execute(
@@ -732,20 +740,96 @@ class Database:
                         t_pnl = t_payout - amt
                         await self._conn.execute(
                             "UPDATE trades SET result = ?, pnl = ? WHERE id = ?",
-                            (result, t_pnl, int(t["id"])),
+                            (effective_result, t_pnl, int(t["id"])),
                         )
                 elif trades_rows:
                     await self._conn.execute(
                         """UPDATE trades
                            SET result = ?, pnl = 0
                            WHERE condition_id = ? AND dry_run = 0""",
-                        (result, condition_id),
+                        (effective_result, condition_id),
                     )
 
                 stats["finalized"] += 1
 
             await self._conn.commit()
         return stats
+
+    async def reconcile_orphan_redeem(
+        self,
+        condition_id: str,
+        *,
+        payout_usdc: float,
+        redeem_tx_hash: str | None = None,
+    ) -> bool:
+        """Reconcile DB rows for a chain-redeemed condition missing from open positions.
+
+        Used by the redeemer orphan path to keep dashboard/result rows correct
+        when chain truth exists but no open DB row was available.
+        """
+        async with self._write_lock:
+            now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            cur = await self._conn.execute(
+                """SELECT id, fill_cost, total_cost, offload_revenue
+                   FROM positions
+                   WHERE condition_id = ?
+                   ORDER BY id DESC
+                   LIMIT 1""",
+                (condition_id,),
+            )
+            pos = await cur.fetchone()
+            if not pos:
+                return False
+
+            fill_cost = float(pos["fill_cost"] or pos["total_cost"] or 0.0)
+            offload = float(pos["offload_revenue"] or 0.0)
+            payout = float(payout_usdc or 0.0)
+            won = payout > 0.000001
+            result = "won" if won else "lost"
+            status = "redeemed" if won else "lost"
+            pnl = (payout + offload - fill_cost) if won else (offload - fill_cost)
+
+            await self._conn.execute(
+                """UPDATE positions
+                   SET status = ?,
+                       result = ?,
+                       closed_at = COALESCE(closed_at, ?),
+                       pnl = ?,
+                       payout_usdc = ?,
+                       redeem_tx_hash = COALESCE(?, redeem_tx_hash),
+                       pnl_finalized = 0,
+                       pnl_finalized_at = NULL,
+                       pnl_finalizer_state = NULL
+                   WHERE condition_id = ?""",
+                (status, result, now, pnl, payout, redeem_tx_hash, condition_id),
+            )
+
+            trades_cur = await self._conn.execute(
+                "SELECT id, amount FROM trades WHERE condition_id = ? AND dry_run = 0",
+                (condition_id,),
+            )
+            trades_rows = await trades_cur.fetchall()
+            total_cost = sum(float(t["amount"] or 0.0) for t in trades_rows)
+            if trades_rows and total_cost > 0:
+                payout_total = pnl + total_cost
+                for t in trades_rows:
+                    amt = float(t["amount"] or 0.0)
+                    weight = amt / total_cost
+                    t_pnl = (payout_total * weight) - amt
+                    await self._conn.execute(
+                        "UPDATE trades SET result = ?, pnl = ? WHERE id = ?",
+                        (result, t_pnl, int(t["id"])),
+                    )
+            elif trades_rows:
+                await self._conn.execute(
+                    """UPDATE trades
+                       SET result = ?, pnl = 0
+                       WHERE condition_id = ? AND dry_run = 0""",
+                    (result, condition_id),
+                )
+
+            await self._conn.commit()
+            return True
 
     # -- Trades --
 

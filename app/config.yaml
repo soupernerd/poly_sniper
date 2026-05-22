@@ -158,13 +158,13 @@ blackout:
 trend:
   hft_bet_amount: 1.0
   hft_flip_profit_pct: 0.0
-  hft_muzzle_seconds: 0
-  hft_max_price: 0.65
-  hft_max_price_5m: 0.65
+  hft_muzzle_seconds: 5
+  hft_max_price: 0.6
+  hft_max_price_5m: 0.6
   hft_max_price_15m: 0.6
   hft_max_price_1h: 0.8
   hft_barrier_enabled: true
-  hft_barrier_pct: 0.05
+  hft_barrier_pct: 0.08
   hft_barrier_pct_15m: 0.05
   hft_barrier_pct_1h: 0.2
   hft_barrier_delay: 5
@@ -176,7 +176,7 @@ trend:
   hft_optimizer_min_trades: 0
   hft_barrier_matrix:
     bitcoin:
-      5m: 0.05
+      5m: 0.08
       15m: 0.05
       1h: 0.2
     ethereum:
@@ -193,7 +193,7 @@ trend:
       1h: 0.3
   hft_max_price_matrix:
     bitcoin:
-      5m: 0.65
+      5m: 0.6
       15m: 0.6
       1h: 0.8
     ethereum:

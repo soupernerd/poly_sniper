@@ -747,6 +747,17 @@ class Redeemer:
                     "payout $%.6f (not in DB) | tx: %s",
                     tag, cp_size, title, payout, result["tx_hash"][:16],
                 )
+                try:
+                    await self.db.reconcile_orphan_redeem(
+                        cp_cid,
+                        payout_usdc=float(payout or 0.0),
+                        redeem_tx_hash=result.get("tx_hash"),
+                    )
+                except Exception as rec_err:
+                    logger.warning(
+                        "Orphan reconcile failed for %s: %s",
+                        cp_cid[:16], rec_err,
+                    )
                 
                 # If we successfully redeemed but got 0 payout, the chain says we have no 
                 # shares. Blacklist this orphan so we never block the event loop checking it again.

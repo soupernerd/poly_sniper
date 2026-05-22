@@ -769,6 +769,12 @@ class PolymarketAPI:
             )
         return latest
 
+    @staticmethod
+    def _redeem_gas_price(w3) -> int:
+        """Use node suggested gas price directly to avoid systematic overpay."""
+        gp = int(w3.eth.gas_price or 0)
+        return gp if gp > 0 else int(w3.to_wei(2, "gwei"))
+
     def redeem_positions_onchain(self, condition_id: str, index_sets: list[int] | None = None) -> dict:
         """Redeem resolved positions via CTF contract.
 
@@ -782,8 +788,7 @@ class PolymarketAPI:
         w3, acct, ctf = self._web3_ctf()
         nonce = self._check_pending_clear(w3, acct)
         cid_bytes = bytes.fromhex(condition_id.replace("0x", ""))
-        gas_price = max(w3.eth.gas_price, w3.to_wei(30, "gwei"))
-        gas_price = int(gas_price * 1.2)  # 20% premium to reduce timeout risk
+        gas_price = self._redeem_gas_price(w3)
         tx = ctf.functions.redeemPositions(
             PUSD, b'\x00' * 32, cid_bytes, index_sets,
         ).build_transaction({
@@ -818,8 +823,7 @@ class PolymarketAPI:
         amounts = [balance, 0] if outcome_index == 0 else [0, balance]
         cid_bytes = bytes.fromhex(condition_id.replace("0x", ""))
         adapter = w3.eth.contract(address=NEGRISK_ADAPTER, abi=_NEGRISK_ADAPTER_ABI)
-        gas_price = max(w3.eth.gas_price, w3.to_wei(30, "gwei"))
-        gas_price = int(gas_price * 1.2)  # 20% premium to reduce timeout risk
+        gas_price = self._redeem_gas_price(w3)
         tx = adapter.functions.redeemPositions(cid_bytes, amounts).build_transaction({
             "from": acct.address,
             "nonce": nonce,
