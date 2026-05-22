@@ -183,6 +183,9 @@ class PolymarketAPI:
                     self._ensure_collateral_approval()
                     break
                 except Exception as e:
+                    if "pending tx(s) in mempool" in str(e).lower():
+                        logger.info("Collateral approval deferred: %s", e)
+                        break
                     logger.warning("Collateral approval attempt %d/3: %s", _attempt + 1, e)
                     if _attempt < 2:
                         await asyncio.sleep(2 ** _attempt)
@@ -193,6 +196,9 @@ class PolymarketAPI:
                     self._ensure_conditional_approval()
                     break
                 except Exception as e:
+                    if "pending tx(s) in mempool" in str(e).lower():
+                        logger.info("Conditional approval deferred: %s", e)
+                        break
                     logger.warning("Conditional approval attempt %d/3: %s", _attempt + 1, e)
                     if _attempt < 2:
                         await asyncio.sleep(2 ** _attempt)
@@ -666,10 +672,12 @@ class PolymarketAPI:
             ("NegRisk Adapter", NEGRISK_ADAPTER),
         ]:
             if ctf.functions.isApprovedForAll(acct.address, operator).call():
+                logger.debug("ERC-1155 approval already set for %s", label)
                 continue
+            nonce = self._check_pending_clear(w3, acct)
             tx = ctf.functions.setApprovalForAll(operator, True).build_transaction({
                 "from": acct.address,
-                "nonce": w3.eth.get_transaction_count(acct.address),
+                "nonce": nonce,
                 "gas": 100_000, "gasPrice": w3.eth.gas_price, "chainId": 137,
             })
             signed = acct.sign_transaction(tx)
@@ -680,7 +688,11 @@ class PolymarketAPI:
             logger.info("ERC-1155 approval set for %s | tx: %s", label, tx_hash.hex())
 
     def _ensure_collateral_approval(self) -> None:
-        """Set pUSD ERC-20 approvals for exchange contracts used by CLOB trading."""
+        """Set pUSD ERC-20 approvals for exchange contracts used by CLOB trading.
+
+        Uses unlimited approvals. Re-approves only if allowance is no longer
+        effectively unlimited.
+        """
         w3, acct, _ctf = self._web3_ctf()
         pusd = w3.eth.contract(address=PUSD, abi=_ERC20_ABI)
         for label, spender in [
@@ -689,10 +701,19 @@ class PolymarketAPI:
         ]:
             allowance = int(pusd.functions.allowance(acct.address, spender).call() or 0)
             if allowance >= (_MAX_UINT256 // 2):
+                logger.debug(
+                    "pUSD allowance already effectively unlimited for %s (allowance=%s)",
+                    label, allowance,
+                )
                 continue
+            nonce = self._check_pending_clear(w3, acct)
+            logger.info(
+                "pUSD allowance not unlimited for %s (allowance=%s), sending max approval",
+                label, allowance,
+            )
             tx = pusd.functions.approve(spender, _MAX_UINT256).build_transaction({
                 "from": acct.address,
-                "nonce": w3.eth.get_transaction_count(acct.address),
+                "nonce": nonce,
                 "gas": 100_000, "gasPrice": w3.eth.gas_price, "chainId": 137,
             })
             signed = acct.sign_transaction(tx)

@@ -7,7 +7,7 @@ api:
 scanner:
   interval_seconds: 1.0
   assets: bitcoin
-  time_frames: 5m,15m,1h
+  time_frames: 5m
   pre_window_seconds: 60
   post_window_seconds: 30
   ws_cleanup_delay: 180
@@ -164,8 +164,8 @@ trend:
   hft_max_price_15m: 0.6
   hft_max_price_1h: 0.8
   hft_barrier_enabled: true
-  hft_barrier_pct: 0.1
-  hft_barrier_pct_15m: 0.1
+  hft_barrier_pct: 0.05
+  hft_barrier_pct_15m: 0.05
   hft_barrier_pct_1h: 0.2
   hft_barrier_delay: 5
   hft_armed_sniper_enabled: true
@@ -176,8 +176,8 @@ trend:
   hft_optimizer_min_trades: 0
   hft_barrier_matrix:
     bitcoin:
-      5m: 0.1
-      15m: 0.1
+      5m: 0.05
+      15m: 0.05
       1h: 0.2
     ethereum:
       5m: 0.35

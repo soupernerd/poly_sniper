@@ -72,11 +72,12 @@ Fund your `POLYMARKET_WALLET_ADDRESS` (in `app/.env`) on **Polygon (PoS)** with:
 - **pUSD** (Polymarket USD, trading balance)
 - **POL** (gas)
 
-On first startup with a fresh wallet, the bot now auto-submits required approval transactions for CLOB V2 trading:
+On first startup with a fresh wallet, the bot auto-checks CLOB V2 approvals and sets unlimited approvals when needed:
 - pUSD approvals to `CTF Exchange` and `Neg Risk CTF Exchange`
 - ERC-1155 `setApprovalForAll` for `CTF Exchange`, `Neg Risk CTF Exchange`, and `Neg Risk Adapter`
 
-Keep enough **POL** in the wallet for these approval transactions.
+Approvals are sticky once set, so after setup this should not keep charging gas on every restart unless allowance/approval state changed.
+Keep enough **POL** in the wallet for any first-time approval transactions.
 
 Recommended (KYC-free): `https://sideshift.ai/a/trade`
 
