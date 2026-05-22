@@ -47,7 +47,7 @@ _TIMEOUT = aiohttp.ClientTimeout(total=15)
 # -- On-chain constants --
 POLYGON_RPC = "https://polygon-bor-rpc.publicnode.com"
 CTF_CONTRACT = Web3.to_checksum_address("0x4D97DCd97eC945f40cF65F87097ACe5EA0476045")
-USDC_E = Web3.to_checksum_address("0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174")
+PUSD = Web3.to_checksum_address("0x23d4FD68783F0c2829D1ED2Be93e6Cc3eDf81c67")
 NEGRISK_ADAPTER = Web3.to_checksum_address("0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296")
 CTF_EXCHANGE = Web3.to_checksum_address("0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E")
 NEGRISK_CTF_EXCHANGE = Web3.to_checksum_address("0xC5d563A36AE78145C45a50134d48A1215220f80a")
@@ -377,14 +377,14 @@ class PolymarketAPI:
     # -- Trading (CLOB API) --
 
     def get_balance(self) -> float:
-        """USDC.e balance in dollars."""
+        """pUSD balance in dollars."""
         if not self._clob_client:
             return 0.0
         try:
             params = BalanceAllowanceParams(asset_type=AssetType.COLLATERAL)
             ba = self._clob_client.get_balance_allowance(params)
             raw = float(ba.get("balance", 0)) if isinstance(ba, dict) else 0.0
-            return raw / 1e6  # USDC.e uses 6 decimals on Polygon
+            return raw / 1e6  # pUSD uses 6 decimals on Polygon
         except Exception as e:
             logger.debug("get_balance failed: %s", e)
             return 0.0
@@ -635,16 +635,16 @@ class PolymarketAPI:
 
     @staticmethod
     def _parse_usdc_payout(receipt, wallet_address: str) -> float:
-        """Parse USDC.e Transfer logs from a redemption receipt.
+        """Parse pUSD Transfer logs from a redemption receipt.
 
-        Returns the total USDC received by wallet_address (float, 6-decimal adjusted).
+        Returns the total pUSD received by wallet_address (float, 6-decimal adjusted).
         This is the on-chain source of truth for won/lost: >0 means won, 0 means lost.
         """
         payout_raw = 0
         wallet_lower = wallet_address.lower()
         for log in receipt.get("logs", []):
             addr = log.get("address", "")
-            if addr.lower() != USDC_E.lower():
+            if addr.lower() != PUSD.lower():
                 continue
             topics = log.get("topics", [])
             if len(topics) < 3:
@@ -656,7 +656,7 @@ class PolymarketAPI:
             if to_addr.lower() == wallet_lower:
                 value = int(log["data"].hex(), 16) if isinstance(log["data"], bytes) else int(log["data"], 16)
                 payout_raw += value
-        return payout_raw / 1e6  # USDC.e has 6 decimals
+        return payout_raw / 1e6  # pUSD has 6 decimals
 
     def _check_pending_clear(self, w3, acct) -> int:
         """Return safe nonce.  Raises if a prior tx is still pending.
@@ -695,7 +695,7 @@ class PolymarketAPI:
         gas_price = max(w3.eth.gas_price, w3.to_wei(30, "gwei"))
         gas_price = int(gas_price * 1.2)  # 20% premium to reduce timeout risk
         tx = ctf.functions.redeemPositions(
-            USDC_E, b'\x00' * 32, cid_bytes, index_sets,
+            PUSD, b'\x00' * 32, cid_bytes, index_sets,
         ).build_transaction({
             "from": acct.address,
             "nonce": nonce,

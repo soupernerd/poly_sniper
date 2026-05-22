@@ -8,7 +8,7 @@ Key responsibilities:
     Payload: status (from shared _bot_state dict), positions, total_pnl,
     log (last 1000 lines), slugs, visitors (active count + IPs), wallet_balance,
     wallet_symbol. Recent trades are fetched separately via /api/trades/recent.
-  - Wallet balance: Fetched via Etherscan v2 API (Polygon USDC.e), cached 30s.
+  - Wallet balance: Fetched via Etherscan v2 API (Polygon pUSD), cached 30s.
   - Visitor tracking: Counts active SSE connections and exposes connected IPs.
   - PIN auth: Simple PIN gate via signed cookie (HMAC). No sessions, no tokens.
 
@@ -103,7 +103,7 @@ def _get_viewer_count() -> dict:
 
 ETHERSCAN_API_KEY = str(os.getenv("POLYGONSCAN_API_KEY", "") or "").strip()
 BALANCE_ADDRESS = str(os.getenv("POLYMARKET_WALLET_ADDRESS", "") or "").strip()
-USDC_TOKEN_ADDRESS = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+PUSD_TOKEN_ADDRESS = "0x23d4FD68783F0c2829D1ED2Be93e6Cc3eDf81c67"
 POLYGON_CHAIN_ID = 137
 BALANCE_CACHE_SECONDS = 30
 
@@ -179,13 +179,13 @@ def _load_slugs() -> dict[str, str]:
 
 
 def _fetch_usdc_balance() -> float | None:
-    """Fetch USDC.e balance on Polygon via Etherscan v2 API (read-only)."""
+    """Fetch pUSD balance on Polygon via Etherscan v2 API (read-only)."""
     if not ETHERSCAN_API_KEY or not BALANCE_ADDRESS:
         return None
     url = (
         f"https://api.etherscan.io/v2/api?chainid={POLYGON_CHAIN_ID}"
         "&module=account&action=tokenbalance"
-        f"&contractaddress={USDC_TOKEN_ADDRESS}"
+        f"&contractaddress={PUSD_TOKEN_ADDRESS}"
         f"&address={BALANCE_ADDRESS}"
         "&tag=latest"
         f"&apikey={ETHERSCAN_API_KEY}"
@@ -319,7 +319,7 @@ def _build_payload() -> dict:
         "log": log_lines,
         "slugs": slugs,
         "wallet_balance": wallet_balance,
-        "wallet_symbol": "USDC.e",
+        "wallet_symbol": "pUSD",
         "wallet_address": BALANCE_ADDRESS,
         "visitors": _get_viewer_count(),
     }

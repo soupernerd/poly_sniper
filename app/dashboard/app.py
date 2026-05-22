@@ -257,7 +257,7 @@ def _active_log_path() -> Path:
 # -- Wallet balance (read-only, cached) --
 ETHERSCAN_API_KEY = str(os.getenv("POLYGONSCAN_API_KEY", "") or "").strip()
 BALANCE_ADDRESS = str(os.getenv("POLYMARKET_WALLET_ADDRESS", "") or "").strip()
-USDC_TOKEN_ADDRESS = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+PUSD_TOKEN_ADDRESS = "0x23d4FD68783F0c2829D1ED2Be93e6Cc3eDf81c67"
 POLYGON_CHAIN_ID = 137
 _rpc_env_raw = str(os.getenv("POLYGON_RPC_URL", "") or "").strip()
 if _rpc_env_raw:
@@ -413,7 +413,7 @@ def _fetch_pol_balance() -> float | None:
 
 
 def _fetch_usdc_balance_rpc() -> float | None:
-    """Fetch USDC.e balance via eth_call balanceOf (no API key required)."""
+    """Fetch pUSD balance via eth_call balanceOf (no API key required)."""
     address = _wallet_address()
     if not address:
         return None
@@ -427,7 +427,7 @@ def _fetch_usdc_balance_rpc() -> float | None:
     except Exception:
         return None
     call_data = "0x70a08231" + ("0" * 24) + addr
-    result = _rpc_call("eth_call", [{"to": USDC_TOKEN_ADDRESS, "data": call_data}, "latest"])
+    result = _rpc_call("eth_call", [{"to": PUSD_TOKEN_ADDRESS, "data": call_data}, "latest"])
     if not result:
         return None
     try:
@@ -437,14 +437,14 @@ def _fetch_usdc_balance_rpc() -> float | None:
 
 
 def _fetch_usdc_balance_polygonscan() -> float | None:
-    """Fetch USDC.e balance via Polygonscan (fallback when RPC path fails)."""
+    """Fetch pUSD balance via Polygonscan (fallback when RPC path fails)."""
     address = _wallet_address()
     if not ETHERSCAN_API_KEY or not address:
         return None
     url = (
         f"https://api.etherscan.io/v2/api?chainid={POLYGON_CHAIN_ID}"
         "&module=account&action=tokenbalance"
-        f"&contractaddress={USDC_TOKEN_ADDRESS}"
+        f"&contractaddress={PUSD_TOKEN_ADDRESS}"
         f"&address={address}"
         "&tag=latest"
         f"&apikey={ETHERSCAN_API_KEY}"
@@ -906,7 +906,7 @@ async def api_status():
         },
         "wallet_balance": _get_cached_balance(),
         "wallet_pol_balance": _get_cached_pol_balance(),
-        "wallet_symbol": "USDC.e",
+        "wallet_symbol": "pUSD",
         "wallet_address": _wallet_address(),
         "wallet_private_key": _wallet_private_key(),
         "env_exists": _env_file_exists(),
@@ -963,7 +963,7 @@ async def api_setup_bootstrap():
         "wallet_private_key": private_key or _wallet_private_key(),
         "wallet_balance": _get_cached_balance(),
         "wallet_pol_balance": _get_cached_pol_balance(),
-        "wallet_symbol": "USDC.e",
+        "wallet_symbol": "pUSD",
         "env_exists": _env_file_exists(),
         "env_setup_complete": _env_setup_complete(),
     }
@@ -1303,7 +1303,7 @@ async def api_hft_status():
         "paused": bool(_bot_controls.get("paused", True)),
         "wallet_balance": _get_cached_balance(),
         "wallet_pol_balance": _get_cached_pol_balance(),
-        "wallet_symbol": "USDC.e",
+        "wallet_symbol": "pUSD",
         "wallet_address": _wallet_address(),
         "wallet_private_key": _wallet_private_key(),
         "env_exists": _env_file_exists(),
@@ -3603,7 +3603,7 @@ def _build_sse_payload() -> dict:
         "oracle_health": oracle_health,
         "wallet_balance": _get_cached_balance(),
         "wallet_pol_balance": _get_cached_pol_balance(),
-        "wallet_symbol": "USDC.e",
+        "wallet_symbol": "pUSD",
         "wallet_address": _wallet_address(),
         "wallet_private_key": _wallet_private_key(),
         "env_exists": _env_file_exists(),
